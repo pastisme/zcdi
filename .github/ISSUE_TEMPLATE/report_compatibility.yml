@@ -1,0 +1,52 @@
+name: Report Title Compatibility
+description: Report how a CD-i title runs in Zcdi.
+title: "[Compatibility]: <title>"
+labels: ["compatibility"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form to report a CD-i game's compatibility with Zcdi.
+        Replace `<title>` with the name of the game.
+
+        Please test the game yourself and report what you observe.
+        For general emulator bugs, use the bug report template instead.
+
+  - type: input
+    id: zcdi_version
+    attributes:
+      label: Zcdi Version
+      description: The release version or Git commit tested.
+      placeholder: release tag or commit hash
+    validations:
+      required: true
+
+  - type: dropdown
+    id: status
+    attributes:
+      label: Compatibility Status
+      options:
+        - Completable
+        - Playable
+        - In-game
+        - Intro / Menu
+        - Won't boot
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: dvc
+    attributes:
+      label: Digital Video Cartridge (DVC)
+      description: Check if DVC is required.
+      options:
+        - label: Required
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Remember that CD-i discs are not region-locked and should work independently of the player's region.
+      placeholder: Optional glitches, reproduction steps, settings, screenshots, or logs.
+    validations:
+      required: false

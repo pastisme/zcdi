@@ -1,0 +1,53 @@
+name: Bug Report
+description: Report a problem that isn't specific to one title (crash, save state, input, build, debugger).
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before Reporting
+      options:
+        - label: This isn't title specific (use the [compatibility report](https://github.com/pastisme/zcdi/issues/new?template=report_compatibility.yml) for that).
+          required: true
+        - label: I searched the existing issues and this hasn't been reported.
+          required: true
+        - label: I read the [FAQ](https://github.com/pastisme/zcdi#faq).
+          required: true
+        - label: My ROM files match the md5 hashes in the [README](https://github.com/pastisme/zcdi#required-rom-files).
+          required: true
+        - label: I tested the latest release or commit.
+          required: true
+
+  - type: input
+    id: zcdi_version
+    attributes:
+      label: Zcdi Version
+      description: The release version or Git commit tested.
+      placeholder: release tag or commit hash
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: Frontend and Platform
+      placeholder: RetroArch 1.21 on Windows 11 x64
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Attach relevant logs, screenshots, save state, etc...
+      value: |
+        What happens:
+
+        Expected:
+
+        Steps to reproduce:
+        1.
+        2.
+    validations:
+      required: true

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-4 16 524 68" width="1048" height="136">
+  <title>zcdi</title>
+  <style>
+    svg { color: #1f2328; }
+    @media (prefers-color-scheme: dark) { svg { color: #fff; } }
+  </style>
+  <g fill="currentColor">
+    <path d="M0 24H120V34L32 66H120V76H0V66L88 34H0Z"/>
+    <g transform="translate(58 0)">
+      <path fill-rule="evenodd" d="M240.3 44A86 30 0 1 0 240.3 56L215.9 56A63 19.5 0 1 1 215.9 44Z"/>
+      <ellipse cx="156" cy="50" rx="19" ry="5.5" fill="none" stroke="currentColor" stroke-width="3.5"/>
+      <path fill-rule="evenodd" d="M249 24H339A56 26 0 0 1 339 76H249ZM263 34V66H339A46 16 0 0 0 339 34Z"/>
+      <rect x="444" y="24" width="16" height="10"/>
+      <rect x="444" y="43" width="16" height="33"/>
+      <path fill="#d81e1e" d="M403 45V56L436 50.5Z"/>
+    </g>
+  </g>
+</svg>

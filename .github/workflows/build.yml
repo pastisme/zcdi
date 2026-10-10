@@ -1,0 +1,259 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Unit tests (Linux)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Configure
+        shell: bash
+        run: |
+          cmake \
+            -S . \
+            -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DZCDI_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+
+  info:
+    name: Core info
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Upload core info artifact
+        uses: actions/upload-artifact@v7
+        with:
+          path: src/libretro/zcdi_libretro.info
+          archive: false
+
+
+  windows:
+    name: Windows x64
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          cmake `
+            -S . `
+            -B build `
+            -G "Visual Studio 17 2022" `
+            -A x64 `
+            -DZCDI_BUILD_TESTS=OFF `
+            -DLIBRETRO_STATIC=OFF `
+            -DLIBRETRO_SUFFIX=""
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item build/Release/zcdi_libretro.dll dist/
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/zcdi_libretro.dll
+          archive: false
+
+
+  windows-debugger:
+    name: Debugger Windows x64
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          cmake `
+            -S debugger `
+            -B build `
+            -G "Visual Studio 17 2022" `
+            -A x64 `
+            -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item build/Release/zcdi_dbg.exe dist/
+
+      - name: Upload Windows debugger artifact
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/zcdi_dbg.exe
+          archive: false
+
+
+  android:
+    name: Android arm64-v8a
+    runs-on: ubuntu-latest
+
+    env:
+      ANDROID_NDK_VERSION: 27.2.12479018
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android NDK
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "ndk;${ANDROID_NDK_VERSION}"
+
+          echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Verify NDK
+        shell: bash
+        run: |
+          echo "ANDROID_NDK_HOME=${ANDROID_NDK_HOME}"
+          cat "${ANDROID_NDK_HOME}/source.properties"
+
+      - name: Configure
+        shell: bash
+        run: |
+          cmake \
+            -S . \
+            -B build \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="${ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-24 \
+            -DZCDI_BUILD_TESTS=OFF \
+            -DLIBRETRO_STATIC=OFF \
+            -DLIBRETRO_SUFFIX=_android
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp build/zcdi_libretro_android.so dist/
+
+      - name: Upload Android artifact
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/zcdi_libretro_android.so
+          archive: false
+
+
+  emscripten:
+    name: Emscripten
+    runs-on: ubuntu-latest
+
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 3.1.74
+
+      - name: Verify Emscripten
+        shell: bash
+        run: |
+          emcc --version
+
+      - name: Configure
+        shell: bash
+        run: |
+          emcmake cmake \
+            -S . \
+            -B build \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DZCDI_BUILD_TESTS=OFF \
+            -DLIBRETRO_STATIC=ON \
+            -DLIBRETRO_SUFFIX=_emscripten
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp build/zcdi_libretro_emscripten.bc \
+             dist/
+
+      - name: Upload Emscripten artifact
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/zcdi_libretro_emscripten.bc
+          archive: false
+
+
+  release:
+    name: Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [tests, info, windows, windows-debugger, android, emscripten]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --generate-notes

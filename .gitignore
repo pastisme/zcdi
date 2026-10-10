@@ -1,0 +1,12 @@
+.vscode/
+/build/
+/build[-_]*/
+/debugger/build/
+/out/
+*.o
+*.a
+*.so
+*.dll
+*.dylib
+*.bc
+third_party/musashi/m68kmake
