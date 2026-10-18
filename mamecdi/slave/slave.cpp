@@ -49,6 +49,7 @@ bool SlaveHle::loaded() {
         if (c.out_len < 0 || c.out_len > int(sizeof(c.out))) return false;
         if (c.out_pos < 0 || c.out_pos > c.out_len) return false;
     }
+    if (tray_state_ > 9 || tray_timer_ < 0 || tray_timer_ > 255) return false;
     return timer_cycle_accum_ >= 0 && timer_cycle_accum_ < kTimerTickCycles && data_count_ < 4;
 }
 
@@ -166,14 +167,15 @@ void SlaveHle::handle_write(int channel, uint8_t v) {
                         queue_master_volume_reply();
                         return;
                     case 0x88: master_enabled_ = !master_enabled_; return;
+                    // To the servo as A6/A7/A8 (command table 0x51d; A8 stops the disc and opens,
+                    // cdapdriv SetStat 0x54 sends 0x93); its disc status reports are forwarded.
                     case 0x89:
                     case 0x92:
-                    case 0x93:
-                        // To the servo as A6/A7/A8 (command table 0x51d; A8 stops the disc and opens,
-                        // cdapdriv SetStat 0x54 sends 0x93); its disc status reply is forwarded.
-                        tray_open_ = v != 0x92;
-                        disc_status_delay_ = kDiscStatusDelayFrames;
+                    case 0x93: {
+                        const uint8_t cmd[4] = {uint8_t(v == 0x89 ? 0xa6 : v == 0x92 ? 0xa7 : 0xa8), 0, 0, 0};
+                        servo_command(cmd);
                         return;
+                    }
                     case 0x8a: // Reset main cpu
                         reset_requested_ = true;
                         return;
@@ -262,14 +264,17 @@ void SlaveHle::handle_write(int channel, uint8_t v) {
 // SERVO firmware 2.1 command dispatch (0x1698); its replies reach channel 3 only after 0xfa.
 void SlaveHle::servo_command(const uint8_t cmd[4]) {
     switch (cmd[0]) {
-        case 0xb0: // Request Disc Status
-            disc_status_delay_ = kDiscStatusDelayFrames; // response arrives in tick_frame(), not now
+        case 0xb0: // Request Disc Status: answered on the next poll
+            report_disc_status();
             return;
-        case 0xa6: // open the tray
-        case 0xa8: // stop the disc and open
-        case 0xa7: // close it
-            tray_open_ = cmd[0] != 0xa7;
-            disc_status_delay_ = kDiscStatusDelayFrames;
+        case 0xa6: // open the tray, unless open or opening
+            if (tray_state_ <= 5 && tray_state_ != 1) tray_request_open();
+            return;
+        case 0xa8: // stop the disc and open, whatever the tray is doing
+            tray_request_open();
+            return;
+        case 0xa7: // close it, unless closed
+            if (tray_state_ != 5) tray_request_close();
             return;
         case 0xa3: { // version 2.x (0x1833); the SLAVE keeps byte 1 either way (0xc55)
             uint8_t r[4] = {0xa3, 0x20, 0x00, 0x00};
@@ -288,23 +293,55 @@ void SlaveHle::servo_command(const uint8_t cmd[4]) {
 
 void SlaveHle::set_tray_open(bool open) {
     if (open == tray_open_) return;
-    tray_open_ = open;
-    disc_status_delay_ = kDiscStatusDelayFrames;
+    const uint8_t cmd[4] = {uint8_t(open ? 0xa6 : 0xa7), 0, 0, 0};
+    servo_command(cmd);
+}
+
+namespace {
+// Frames each tray state lasts before the next (firmware 0x1ad7, 8.2 ms ticks). Fixed in the
+// firmware: 9 (4 ticks), 4 (10 ticks), 2 (14 ticks or more). The others wait on the disc
+// stopping or the tray switches, so they are guesses for a ~1 s move; 5 is the TOC read.
+constexpr uint8_t kTrayStepFrames[10] = {0, 0, 6, 30, 4, 50, 10, 10, 30, 2};
+constexpr uint8_t kTrayNextState[10] = {0, 1, 3, 4, 5, 5, 7, 8, 9, 1};
+} // namespace
+
+// Open request by tray state (table 0x1b83): closed starts at 6; moving trays reverse to 2.
+void SlaveHle::tray_request_open() {
+    static constexpr uint8_t kTo[10] = {7, 2, 7, 7, 7, 6, 0, 2, 2, 2};
+    if (kTo[tray_state_]) enter_tray_state(kTo[tray_state_]);
+}
+
+// Close request by tray state (table 0x1b97): 6 has not moved yet, so it is closed again.
+void SlaveHle::tray_request_close() {
+    static constexpr uint8_t kTo[10] = {2, 2, 0, 0, 0, 0, 5, 2, 2, 2};
+    if (kTo[tray_state_]) enter_tray_state(kTo[tray_state_]);
+}
+
+void SlaveHle::enter_tray_state(uint8_t state) {
+    tray_state_ = state;
+    tray_open_ = state == 1 || state >= 6;
+    tray_timer_ = kTrayStepFrames[state];
+    report_disc_status();
+}
+
+// The servo sends this whenever it changes (0x178b), the SLAVE forwards it after 0xfa.
+void SlaveHle::report_disc_status() {
+    // Type 00 until the TOC is read (0x1acb clears it), then 01 audio, 03 no disc.
+    // Servo 2.1 gives 0x02 for a CD-i TOC (disc type 0x10, Green Book VII.10.1.a), as our CDIC TOC
+    // says; kept at 0x04 as measured on a 210/05 (CDi_MiSTer). The BIOS treats 0x02 and 0x04 alike.
+    uint8_t type = 0x00;
+    if (tray_state_ == 5 && tray_timer_ == 0) type = !disc_present_ ? 0x03 : disc_audio_ ? 0x01 : 0x04;
+    uint8_t r[4] = {0xb0, 0x00, type, uint8_t(0x20 | tray_state_)};
+    if (status_forwarding_) queue_response(3, r, 4);
 }
 
 void SlaveHle::tick_frame() {
-    if (disc_status_delay_ > 0 && --disc_status_delay_ == 0) {
-        // Measured on a 210/05 (CDi_MiSTer servo_hle.sv); MAME's B0 00 02 15 made cdi200 ignore OPEN.
-        uint8_t r[4] = {0xb0, 0x00, 0x03, 0x25};
-        if (tray_open_) {
-            r[3] = 0x21;
-        } else if (disc_present_) {
-            // Servo 2.1 gives 0x02 for a CD-i TOC (disc type 0x10, Green Book VII.10.1.a), as our CDIC
-            // TOC says; kept at 0x04 as measured above. The BIOS treats 0x02 and 0x04 alike.
-            r[2] = disc_audio_ ? 0x01 : 0x04;
-        }
-        if (status_forwarding_) queue_response(3, r, 4);
+    if (tray_timer_ == 0 || --tray_timer_ != 0) return;
+    if (tray_state_ == 5) {
+        report_disc_status(); // the TOC is read: the disc type is known
+        return;
     }
+    enter_tray_state(kTrayNextState[tray_state_]);
 }
 
 void SlaveHle::update_pointer(int dx, int dy, bool button1, bool button2, bool button12) {

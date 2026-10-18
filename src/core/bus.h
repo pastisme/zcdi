@@ -183,7 +183,7 @@ private:
     // Handed to the CDIC only while the tray is closed: sync_tray() after
     // anything that can move the tray.
     Disc* disc_ = nullptr;
-    void sync_tray() { cdic_.set_disc(slave_.tray_open() ? nullptr : disc_); }
+    void sync_tray() { cdic_.set_disc(slave_.tray_closed() ? disc_ : nullptr); }
 
     std::vector<uint8_t> plane0_; // 0x000000-0x07ffff: video plane 0 DRAM
     std::vector<uint8_t> plane1_; // 0x200000-0x27ffff: video plane 1 DRAM

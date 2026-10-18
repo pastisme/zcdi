@@ -25,8 +25,9 @@ struct SlaveSaveState {
 
     Channel channels_[kNumChannels];
     bool irq2_ = false;
-    int disc_status_delay_ = 0;
-    // While set, Bus keeps the disc from the CDIC.
+    // Frames to the servo's next tray step; when closed, until the disc type is known.
+    int tray_timer_ = 0;
+    // Open or opening: what the frontend sees as ejected.
     bool tray_open_ = false;
     // Channel 3's 0xfa/0xfb ($63 bit 7); cleared at power-on.
     bool status_forwarding_ = false;
@@ -34,6 +35,8 @@ struct SlaveSaveState {
     bool reply_irq_enabled_ = false;
     // $52: byte 1 of the servo's 0xa3 reply, the last byte of 0xf0's reply; 0 until then.
     uint8_t servo_version_ = 0;
+    // Servo $99: 1 open, 2-4 closing, 5 closed, 6-9 opening (firmware 0x1ac3).
+    uint8_t tray_state_ = 5;
 
     // SLAVE firmware 2.0 audio attenuation; comments give each field's RAM location.
     int timer_cycle_accum_ = 0;
@@ -75,7 +78,7 @@ public:
     uint8_t read_byte(uint32_t addr);
     void write_byte(uint32_t addr, uint8_t v);
 
-    // Counts down the 0xb0 / tray disc-status reply delay. Once per frame.
+    // Steps the servo's tray. Once per frame.
     void tick_frame();
 
     bool irq2_asserted() const { return irq2_; }
@@ -90,9 +93,11 @@ public:
         disc_audio_ = audio;
     }
 
-    // Player's own tray button or frontend eject; reports like channel 2's 0x89/0x92.
+    // Player's own tray button or frontend eject; acts like the servo's 0xa6/0xa7.
     void set_tray_open(bool open);
     bool tray_open() const { return tray_open_; }
+    // Only a fully closed tray lets the CDIC read the disc.
+    bool tray_closed() const { return tray_state_ == 5; }
 
     // Configuration, set once before boot, not saved.
     void set_video_standard(VideoStandard standard) { video_standard_ = standard; }
@@ -122,8 +127,12 @@ private:
     // Channel 2 0xf5 reply: the current master volume attenuation in dB (firmware 0xf7e).
     void queue_master_volume_reply();
 
-    // 0xb0's reply comes ~250 ms after the command (same_cdi/MAME trace), 13 PAL frames.
-    static constexpr int kDiscStatusDelayFrames = 13;
+    // Servo tray requests (firmware tables 0x1b83 open, 0x1b97 close).
+    void tray_request_open();
+    void tray_request_close();
+    void enter_tray_state(uint8_t state);
+    // b0 00 <disc type> <0x20 | tray state>, on channel 3 once 0xfa was sent.
+    void report_disc_status();
     bool disc_present_ = false;
     bool disc_audio_ = false;
     VideoStandard video_standard_ = VideoStandard::kNtsc;

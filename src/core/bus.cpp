@@ -247,7 +247,11 @@ void Bus::periph_tick(int cpu_cycles) {
     slave_.tick_cycles(cpu_cycles);
 }
 
-void Bus::slave_tick_frame() { slave_.tick_frame(); }
+void Bus::slave_tick_frame() {
+    const bool was_closed = slave_.tray_closed();
+    slave_.tick_frame();
+    if (slave_.tray_closed() != was_closed) sync_tray();
+}
 
 void Bus::update_pointer(int dx, int dy, bool button1, bool button2, bool button12) {
     slave_.update_pointer(dx, dy, button1, button2, button12);
