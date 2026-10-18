@@ -33,6 +33,13 @@ TEST_CASE("0xf0 replies revision 2.0 and the servo byte") {
     CHECK(read_reply(slave) == 0xf02000);
 }
 
+TEST_CASE("0xf0 carries the servo version once the servo was asked for it") {
+    SlaveHle slave;
+    for (uint8_t b : {0xa3, 0x00, 0x00, 0x00}) slave.write_byte(channel_addr(3), b);  // not forwarded
+    slave.write_byte(channel_addr(3), 0xf0);
+    CHECK(read_reply(slave) == 0xf02020);
+}
+
 TEST_CASE("0xf5 replies the master level") {
     SlaveHle slave;
     slave.write_byte(channel_addr(2), 0x88); // master volume on

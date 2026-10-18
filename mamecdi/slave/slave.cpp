@@ -168,8 +168,10 @@ void SlaveHle::handle_write(int channel, uint8_t v) {
                     case 0x88: master_enabled_ = !master_enabled_; return;
                     case 0x89:
                     case 0x92:
-                        // To the servo as A6/A7 (command table 0x51d); its disc status reply is forwarded.
-                        tray_open_ = v == 0x89;
+                    case 0x93:
+                        // To the servo as A6/A7/A8 (command table 0x51d; A8 stops the disc and opens,
+                        // cdapdriv SetStat 0x54 sends 0x93); its disc status reply is forwarded.
+                        tray_open_ = v != 0x92;
                         disc_status_delay_ = kDiscStatusDelayFrames;
                         return;
                     case 0x8a: // Reset main cpu
@@ -189,8 +191,8 @@ void SlaveHle::handle_write(int channel, uint8_t v) {
             case 3:
                 switch (v) {
                     case 0xf0: {
-                        // Revision 2.0, then the servo's 0xa3 byte, which this servo never sends (firmware 0xf19).
-                        uint8_t r[3] = {0xf0, 0x20, 0x00};
+                        // Revision 2.0, then the servo's 0xa3 byte (firmware 0xf19).
+                        uint8_t r[3] = {0xf0, 0x20, servo_version_};
                         queue_response(2, r, 3);
                         return;
                     }
@@ -224,23 +226,25 @@ void SlaveHle::handle_write(int channel, uint8_t v) {
                     case 0xfb: // stop forwarding them
                         status_forwarding_ = false;
                         return;
-                    case 0xb0: // Request Disc Status: needs 3 more bytes
+                    default:
+                        // 0x80-0xef start a 4-byte command; all but 0x80/0x81 go to the servo
+                        // (firmware 0x3da), e.g. through cdapdriv SetStat 0x52.
+                        if (v < 0x80 || v >= 0xf0) return;
                         c.in[0] = v;
                         c.in_len = 1;
                         return;
-                    default: return; // unrecognized: immediately ignored, no state change
                 }
         }
         return;
     }
 
-    // Continuation of channel 0's Set Pointer Position or channel 3's 0xb0.
+    // Continuation of channel 0's Set Pointer Position or a channel 3 command.
     if (c.in_len < static_cast<int>(sizeof(c.in))) c.in[c.in_len++] = v;
 
-    if (channel == 3 && c.in[0] == 0xb0) {
+    if (channel == 3) {
         if (c.in_len == 4) {
-            disc_status_delay_ = kDiscStatusDelayFrames; // response arrives in tick_frame(), not now
             c.in_len = 0;
+            servo_command(c.in);
         }
         return;
     }
@@ -252,6 +256,33 @@ void SlaveHle::handle_write(int channel, uint8_t v) {
         set_pointer_position(((b1 & 0x70) << 3) | (b2 & 0x7f), ((b1 & 0x0f) << 6) | (b0 & 0x3f));
         c.in_len = 0;
         return;
+    }
+}
+
+// SERVO firmware 2.1 command dispatch (0x1698); its replies reach channel 3 only after 0xfa.
+void SlaveHle::servo_command(const uint8_t cmd[4]) {
+    switch (cmd[0]) {
+        case 0xb0: // Request Disc Status
+            disc_status_delay_ = kDiscStatusDelayFrames; // response arrives in tick_frame(), not now
+            return;
+        case 0xa6: // open the tray
+        case 0xa8: // stop the disc and open
+        case 0xa7: // close it
+            tray_open_ = cmd[0] != 0xa7;
+            disc_status_delay_ = kDiscStatusDelayFrames;
+            return;
+        case 0xa3: { // version 2.x (0x1833); the SLAVE keeps byte 1 either way (0xc55)
+            uint8_t r[4] = {0xa3, 0x20, 0x00, 0x00};
+            servo_version_ = r[1];
+            if (status_forwarding_) queue_response(3, r, 4);
+            return;
+        }
+        case 0xa4: { // echo (0x1863)
+            uint8_t r[4] = {0xa4, cmd[1], cmd[2], cmd[3]};
+            if (status_forwarding_) queue_response(3, r, 4);
+            return;
+        }
+        default: return; // 0x80/0x81 stay in the SLAVE; b1 has no reply without a second session
     }
 }
 
@@ -268,6 +299,8 @@ void SlaveHle::tick_frame() {
         if (tray_open_) {
             r[3] = 0x21;
         } else if (disc_present_) {
+            // Servo 2.1 gives 0x02 for a CD-i TOC (disc type 0x10, Green Book VII.10.1.a), as our CDIC
+            // TOC says; kept at 0x04 as measured above. The BIOS treats 0x02 and 0x04 alike.
             r[2] = disc_audio_ ? 0x01 : 0x04;
         }
         if (status_forwarding_) queue_response(3, r, 4);

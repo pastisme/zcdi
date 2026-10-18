@@ -90,4 +90,38 @@ TEST_CASE("the tray moved from outside reports like 0x89/0x92") {
     CHECK(wait_disc_status(slave, 50) == 0xb0000425);
 }
 
+TEST_CASE("0x93 stops the disc and opens the tray (servo A8)") {
+    SlaveHle slave;
+    slave.set_disc_present(true, false);
+    slave.write_byte(channel_addr(3), 0xfa);
+    slave.write_byte(channel_addr(2), 0x93);
+    CHECK(slave.tray_open());
+    CHECK(wait_disc_status(slave, 50) == 0xb0000321);
+}
+
+TEST_CASE("raw servo commands on channel 3 move the tray") {
+    SlaveHle slave;
+    slave.set_disc_present(true, false);
+    slave.write_byte(channel_addr(3), 0xfa);
+    for (uint8_t b : {0xa6, 0x00, 0x00, 0x00}) slave.write_byte(channel_addr(3), b);
+    CHECK(slave.tray_open());
+    CHECK(wait_disc_status(slave, 50) == 0xb0000321);
+    for (uint8_t b : {0xa7, 0x00, 0x00, 0x00}) slave.write_byte(channel_addr(3), b);
+    CHECK(!slave.tray_open());
+    CHECK(wait_disc_status(slave, 50) == 0xb0000425);
+    for (uint8_t b : {0xa8, 0x00, 0x00, 0x00}) slave.write_byte(channel_addr(3), b);
+    CHECK(slave.tray_open());
+}
+
+TEST_CASE("servo version and echo replies are forwarded only after 0xfa") {
+    SlaveHle slave;
+    for (uint8_t b : {0xa3, 0x00, 0x00, 0x00}) slave.write_byte(channel_addr(3), b);
+    CHECK(!slave.irq2_asserted());
+    slave.write_byte(channel_addr(3), 0xfa);
+    for (uint8_t b : {0xa3, 0x00, 0x00, 0x00}) slave.write_byte(channel_addr(3), b);
+    CHECK(wait_disc_status(slave, 1) == 0xa3200000);
+    for (uint8_t b : {0xa4, 0x0c, 0x0d, 0x0e}) slave.write_byte(channel_addr(3), b);
+    CHECK(wait_disc_status(slave, 1) == 0xa40c0d0e);
+}
+
 }  // TEST_SUITE

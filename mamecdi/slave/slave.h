@@ -32,6 +32,8 @@ struct SlaveSaveState {
     bool status_forwarding_ = false;
     // Channel 3's 0xf8/0xf9 ($63 bit 6): channel 2 replies raise IN2; cleared at power-on.
     bool reply_irq_enabled_ = false;
+    // $52: byte 1 of the servo's 0xa3 reply, the last byte of 0xf0's reply; 0 until then.
+    uint8_t servo_version_ = 0;
 
     // SLAVE firmware 2.0 audio attenuation; comments give each field's RAM location.
     int timer_cycle_accum_ = 0;
@@ -115,6 +117,8 @@ public:
 private:
     void handle_write(int channel, uint8_t v);
     void queue_response(int out_channel, const uint8_t* data, int len);
+    // A 4-byte channel 3 command, as the servo handles it.
+    void servo_command(const uint8_t cmd[4]);
     // Channel 2 0xf5 reply: the current master volume attenuation in dB (firmware 0xf7e).
     void queue_master_volume_reply();
 
