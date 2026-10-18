@@ -131,9 +131,6 @@ public:
     inline const uint8_t* cpu_read_ptr(uint32_t a, uint32_t size) const;
     inline uint8_t* cpu_write_ptr(uint32_t a, uint32_t size);
 
-    // CDi_MiSTer rtl/sdram.sv latency for SDRAM-backed addresses, else 0.
-    int sdram_wait_cycles(uint32_t a) const;
-
     // SR.S of the attached CPU; false without one.
     bool cpu_supervisor() const;
 

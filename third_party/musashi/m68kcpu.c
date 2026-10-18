@@ -1212,12 +1212,6 @@ void m68k_pulse_bus_error_at(unsigned int address)
 	m68ki_exception_bus_error();
 }
 
-/* zcdi: memory wait states (see m68k.h), on the USE_CYCLES counter. */
-void m68k_add_wait_cycles(int cycles)
-{
-	m68ki_remaining_cycles -= cycles;
-}
-
 /* Pulse the RESET line on the CPU */
 void m68k_pulse_reset(void)
 {

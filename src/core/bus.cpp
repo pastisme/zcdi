@@ -542,13 +542,6 @@ bool Bus::is_decoded(uint32_t a) const {
     return false;
 }
 
-namespace {
-// CDi_MiSTer [zcdi-arbit] average, arbitration included; std::round isn't
-// constexpr in C++20.
-constexpr double kMeasuredSdramCyclesPerAccess = 3.65;
-constexpr int kSdramAccessWaitCycles = static_cast<int>(kMeasuredSdramCyclesPerAccess + 0.5);
-} // namespace
-
 void Bus::set_cpu(MusashiCore* cpu) {
     cpu_ = cpu;
     if (cpu)
@@ -558,16 +551,6 @@ void Bus::set_cpu(MusashiCore* cpu) {
 }
 
 bool Bus::cpu_supervisor() const { return cpu_ && cpu_->supervisor(); }
-
-int Bus::sdram_wait_cycles(uint32_t a) const {
-    if (in_range(a, kPlane0Base, kPlane0Size)) return kSdramAccessWaitCycles;
-    if (in_range(a, kPlane1Base, kPlane1Size)) return kSdramAccessWaitCycles;
-    if (in_range(a, kBiosBase, kBiosSize)) return kSdramAccessWaitCycles;
-    if (in_range(a, kDvcCartRamBase, kDvcCartRamSize)) return kSdramAccessWaitCycles;
-    if (in_range(a, kDvcCartRomBase, kDvcCartRomSize)) return kSdramAccessWaitCycles;
-    if (in_range(a, kDvcDecodeRamBase, kDvcDecodeRamSize)) return kSdramAccessWaitCycles;
-    return 0;
-}
 
 } // namespace zcdi
 
@@ -611,14 +594,12 @@ unsigned int m68k_read_memory_8(unsigned int addr) {
     if (!bus) return 0;
     const uint32_t a = cpu_bus_address(*bus, addr);
     if (const uint8_t* p = bus->cpu_read_ptr(a, 1)) {
-        m68k_add_wait_cycles(zcdi::kSdramAccessWaitCycles);
         return p[0];
     }
     if (!bus->is_decoded(a)) {
         m68k_pulse_bus_error_at(addr);
         return 0;
     }
-    m68k_add_wait_cycles(bus->sdram_wait_cycles(a));
     return bus->read8(a);
 }
 unsigned int m68k_read_memory_16(unsigned int addr) {
@@ -626,14 +607,12 @@ unsigned int m68k_read_memory_16(unsigned int addr) {
     if (!bus) return 0;
     const uint32_t a = cpu_bus_address(*bus, addr);
     if (const uint8_t* p = bus->cpu_read_ptr(a, 2)) {
-        m68k_add_wait_cycles(zcdi::kSdramAccessWaitCycles);
         return (unsigned(p[0]) << 8) | p[1];
     }
     if (!bus->is_decoded(a)) {
         m68k_pulse_bus_error_at(addr);
         return 0;
     }
-    m68k_add_wait_cycles(bus->sdram_wait_cycles(a));
     return bus->read16(a);
 }
 unsigned int m68k_read_memory_32(unsigned int addr) {
@@ -643,7 +622,6 @@ unsigned int m68k_read_memory_32(unsigned int addr) {
     const uint32_t a2 = cpu_bus_address(*bus, addr + 2);
     const uint8_t* hi = bus->cpu_read_ptr(a, 2);
     if (const uint8_t* lo = hi ? bus->cpu_read_ptr(a2, 2) : nullptr) {
-        m68k_add_wait_cycles(2 * zcdi::kSdramAccessWaitCycles);
         return (unsigned(hi[0]) << 24) | (unsigned(hi[1]) << 16) | (unsigned(lo[0]) << 8) | lo[1];
     }
     // Two 16-bit bus cycles, decoded separately: a straddle faults at word 2.
@@ -655,7 +633,6 @@ unsigned int m68k_read_memory_32(unsigned int addr) {
         m68k_pulse_bus_error_at(addr + 2);
         return 0;
     }
-    m68k_add_wait_cycles(2 * bus->sdram_wait_cycles(a));
     // Separately normalized, so 0xfffffe wraps to 0 like the 24-bit bus.
     return (uint32_t(bus->read16(a)) << 16) | bus->read16(a2);
 }
@@ -664,7 +641,6 @@ void m68k_write_memory_8(unsigned int addr, unsigned int v) {
     if (!bus) return;
     const uint32_t a = cpu_bus_address(*bus, addr);
     if (uint8_t* p = bus->cpu_write_ptr(a, 1)) {
-        m68k_add_wait_cycles(zcdi::kSdramAccessWaitCycles);
         p[0] = uint8_t(v);
         return;
     }
@@ -672,7 +648,6 @@ void m68k_write_memory_8(unsigned int addr, unsigned int v) {
         m68k_pulse_bus_error_at(addr);
         return;
     }
-    m68k_add_wait_cycles(bus->sdram_wait_cycles(a));
     bus->write8(a, uint8_t(v));
 }
 void m68k_write_memory_16(unsigned int addr, unsigned int v) {
@@ -680,7 +655,6 @@ void m68k_write_memory_16(unsigned int addr, unsigned int v) {
     if (!bus) return;
     const uint32_t a = cpu_bus_address(*bus, addr);
     if (uint8_t* p = bus->cpu_write_ptr(a, 2)) {
-        m68k_add_wait_cycles(zcdi::kSdramAccessWaitCycles);
         p[0] = uint8_t(v >> 8);
         p[1] = uint8_t(v);
         return;
@@ -689,7 +663,6 @@ void m68k_write_memory_16(unsigned int addr, unsigned int v) {
         m68k_pulse_bus_error_at(addr);
         return;
     }
-    m68k_add_wait_cycles(bus->sdram_wait_cycles(a));
     bus->write16(a, uint16_t(v));
 }
 void m68k_write_memory_32(unsigned int addr, unsigned int v) {
@@ -699,7 +672,6 @@ void m68k_write_memory_32(unsigned int addr, unsigned int v) {
     const uint32_t a2 = cpu_bus_address(*bus, addr + 2);
     uint8_t* hi = bus->cpu_write_ptr(a, 2);
     if (uint8_t* lo = hi ? bus->cpu_write_ptr(a2, 2) : nullptr) {
-        m68k_add_wait_cycles(2 * zcdi::kSdramAccessWaitCycles);
         hi[0] = uint8_t(v >> 24);
         hi[1] = uint8_t(v >> 16);
         lo[0] = uint8_t(v >> 8);
@@ -715,7 +687,6 @@ void m68k_write_memory_32(unsigned int addr, unsigned int v) {
         m68k_pulse_bus_error_at(addr + 2);
         return;
     }
-    m68k_add_wait_cycles(2 * bus->sdram_wait_cycles(a));
     bus->write16(a, uint16_t(v >> 16));
     bus->write16(a2, uint16_t(v));
 }
