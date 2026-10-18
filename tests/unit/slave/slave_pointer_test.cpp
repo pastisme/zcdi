@@ -116,6 +116,19 @@ TEST_CASE("one tick spanning many slots runs every boundary") {
     CHECK(slave.irq2_asserted());
     uint8_t b0 = slave.read_byte(channel_addr(0));
     CHECK((b0 & (0x02 << 3)) != 0);
+    CHECK((b0 & 0x80) != 0);  // firmware 0xe27 ors in 0x88
+}
+
+TEST_CASE("pointer enable decodes on the low nibble") {
+    Harness h(false);
+    h.slave.update_pointer(10, 10, true);
+    h.slave.write_byte(channel_addr(0), 0x93);  // 0x83 to the firmware
+    h.run(20L * kSlot);
+    REQUIRE(h.reports.size() == 1);
+    h.slave.write_byte(channel_addr(0), 0xb4);  // 0x84
+    h.slave.update_pointer(5, 0, false);
+    h.run(20L * kSlot);
+    CHECK(h.reports.size() == 1);
 }
 
 TEST_CASE("no reports before pointer input is enabled, or after it's disabled") {

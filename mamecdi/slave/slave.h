@@ -30,6 +30,8 @@ struct SlaveSaveState {
     bool tray_open_ = false;
     // Channel 3's 0xfa/0xfb ($63 bit 7); cleared at power-on.
     bool status_forwarding_ = false;
+    // Channel 3's 0xf8/0xf9 ($63 bit 6): channel 2 replies raise IN2; cleared at power-on.
+    bool reply_irq_enabled_ = false;
 
     // SLAVE firmware 2.0 audio attenuation; comments give each field's RAM location.
     int timer_cycle_accum_ = 0;
@@ -113,6 +115,8 @@ public:
 private:
     void handle_write(int channel, uint8_t v);
     void queue_response(int out_channel, const uint8_t* data, int len);
+    // Channel 2 0xf5 reply: the current master volume attenuation in dB (firmware 0xf7e).
+    void queue_master_volume_reply();
 
     // 0xb0's reply comes ~250 ms after the command (same_cdi/MAME trace), 13 PAL frames.
     static constexpr int kDiscStatusDelayFrames = 13;

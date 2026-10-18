@@ -84,7 +84,6 @@ void Machine::remove_disc() {
 }
 
 namespace {
-// No migration before 1.0: a state from another version is rejected.
 constexpr uint32_t kStateFormatVersion = 1;
 
 void append_le32(std::vector<uint8_t>& out, int32_t v) {

@@ -85,7 +85,12 @@ void SlaveHle::queue_response(int out_channel, const uint8_t* data, int len) {
         c.out[i] = data[i];
     c.out_len = len;
     c.out_pos = 0;
-    irq2_ = true;
+    if (out_channel != 2 || reply_irq_enabled_) irq2_ = true;
+}
+
+void SlaveHle::queue_master_volume_reply() {
+    uint8_t r[2] = {0xf5, uint8_t(master_ & 0x3f)};
+    queue_response(2, r, 2);
 }
 
 // As MAME slave_w: an unmatched byte resets the channel's input at once, and
@@ -103,12 +108,14 @@ void SlaveHle::handle_write(int channel, uint8_t v) {
                     return;
                 }
                 // Enable/disable pointer input; the BIOS sends 0x83 after installing its handler (cdi220b 0x431b18).
-                if (v == 0x83) {
+                // 0x80-0xbf decode on the low nibble alone (firmware 0x3b6), so 0x93 is 0x83.
+                if (v < 0x80) return;
+                if ((v & 0x0f) == 0x03) {
                     pointer_enabled_ = true;
                     have_reported_ = false;
                     return;
                 }
-                if (v == 0x84) {
+                if ((v & 0x0f) == 0x04) {
                     pointer_enabled_ = false;
                     return;
                 }
@@ -156,6 +163,7 @@ void SlaveHle::handle_write(int channel, uint8_t v) {
                         return;
                     case 0x87: // stop the ramp
                         master_ &= 0x3f;
+                        queue_master_volume_reply();
                         return;
                     case 0x88: master_enabled_ = !master_enabled_; return;
                     case 0x89:
@@ -181,10 +189,11 @@ void SlaveHle::handle_write(int channel, uint8_t v) {
             case 3:
                 switch (v) {
                     case 0xf0: {
-                        uint8_t r[2] = {0xf0, 0x32};
-                        queue_response(2, r, 2);
+                        // Revision 2.0, then the servo's 0xa3 byte, which this servo never sends (firmware 0xf19).
+                        uint8_t r[3] = {0xf0, 0x20, 0x00};
+                        queue_response(2, r, 3);
                         return;
-                    } // revision
+                    }
                     // The real SLAVE firmware (as CDi_MiSTer runs it) replies 2; MAME's HLE guesses 1.
                     case 0xf3: {
                         uint8_t r[2] = {0xf3, 0x02};
@@ -196,16 +205,19 @@ void SlaveHle::handle_write(int channel, uint8_t v) {
                         queue_response(2, r, 2);
                         return;
                     } // test plug
+                    case 0xf5: queue_master_volume_reply(); return;
                     case 0xf6: {
-                        // Poll-only, no IN2. Firmware 0xf9a: ((RAM $5a & 4) >> 2) + 1 from the STAND
-                        // pin; the BIOS programs 50 Hz for 2 (cdi220b 0x400f16, cdi200 0x400f1e).
-                        Channel& out = channels_[2];
-                        out.out[0] = 0xf6;
-                        out.out[1] = static_cast<uint8_t>(video_standard_);
-                        out.out_len = 2;
-                        out.out_pos = 0;
+                        // Firmware 0xf9a: ((RAM $5a & 4) >> 2) + 1 from the STAND pin; the BIOS
+                        // polls it before 0xf8 and programs 50 Hz for 2 (cdi220b 0x400f16).
+                        uint8_t r[2] = {0xf6, static_cast<uint8_t>(video_standard_)};
+                        queue_response(2, r, 2);
                         return;
                     }
+                    case 0xf8: // sldriv init
+                        reply_irq_enabled_ = true;
+                        if (channels_[2].out_pos < channels_[2].out_len) irq2_ = true;
+                        return;
+                    case 0xf9: reply_irq_enabled_ = false; return;
                     case 0xfa: // forward the servo's messages (disc status)
                         status_forwarding_ = true;
                         return;
@@ -360,9 +372,14 @@ void SlaveHle::channel2_data(uint8_t v) {
                 master_ = uint8_t((v & 0x3f) | 0x80);
             } else if (master_ & 0xc0) {
                 master_ &= 0x3f; // a ramp was running: only stop it
+                queue_master_volume_reply();
                 return;
             } else {
                 master_ = v & 0x3f;
+                dim_ = false;
+                apply_dacs();
+                queue_master_volume_reply();
+                return;
             }
             dim_ = false;
             apply_dacs();
@@ -433,8 +450,9 @@ void SlaveHle::reset_dac_window() {
 void SlaveHle::on_pointer_slot() {
     if (report_slots_left_ > 0) {
         if (--report_slots_left_ == 0) {
+            // Byte 0 has bit 7 set (firmware 0xe27: 0x88 | buttons | x high bits).
             const uint8_t report[4] = {
-                uint8_t(((reported_x_ & 0x380) >> 7) | (reported_button_bits_ << 3)),
+                uint8_t(0x80 | ((reported_x_ & 0x380) >> 7) | (reported_button_bits_ << 3)),
                 uint8_t(reported_x_ & 0x7f),
                 uint8_t((reported_y_ & 0x380) >> 7),
                 uint8_t(reported_y_ & 0x7f),
