@@ -2,9 +2,9 @@
 
 #include "cdic/cdic.h"
 #include "core/machine_inspector.h"
-#include "imgui/imgui.h"
 #include "disc/sector.h"
 #include "dvc/dvc_video.h"
+#include "imgui/imgui.h"
 #include "scc68070/scc68070.h"
 #include "slave/slave.h"
 #include "vmpeg/vmpeg.h"
