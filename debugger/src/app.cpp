@@ -228,13 +228,17 @@ void DebuggerApp::step_emulation_frame() {
         if (state_.input.keyboard_down) state_.input.dy += step;
     }
 
-    const bool button1 = state_.input.mouse_button1 || state_.input.keyboard_key_z || state_.input.keyboard_key_s;
-    const bool button2 = state_.input.mouse_button2 || state_.input.keyboard_key_x;
-    const bool button12 = state_.input.mouse_button12 || state_.input.keyboard_key_a;
+    const bool button1 = state_.input.pressed_button1 || state_.input.mouse_button1 || state_.input.keyboard_key_z ||
+                         state_.input.keyboard_key_s;
+    const bool button2 = state_.input.pressed_button2 || state_.input.mouse_button2 || state_.input.keyboard_key_x;
+    const bool button12 = state_.input.pressed_button12 || state_.input.mouse_button12 || state_.input.keyboard_key_a;
 
     state_.machine->bus().update_pointer(state_.input.dx, state_.input.dy, button1, button2, button12);
     state_.input.dx = 0;
     state_.input.dy = 0;
+    state_.input.pressed_button1 = false;
+    state_.input.pressed_button2 = false;
+    state_.input.pressed_button12 = false;
 
     state_.machine->run_frame();
     queue_audio_frame();
@@ -1200,6 +1204,9 @@ void DebuggerApp::event(const sapp_event* ev) {
         state_.input.mouse_button1 = false;
         state_.input.mouse_button2 = false;
         state_.input.mouse_button12 = false;
+        state_.input.pressed_button1 = false;
+        state_.input.pressed_button2 = false;
+        state_.input.pressed_button12 = false;
     };
 
     auto set_keyboard_key = [this](sapp_keycode key_code, bool down) {
@@ -1215,6 +1222,10 @@ void DebuggerApp::event(const sapp_event* ev) {
             case SAPP_KEYCODE_A: state_.input.keyboard_key_a = down; break;
             default: break;
         }
+        if (!down) return;
+        if (key_code == SAPP_KEYCODE_Z || key_code == SAPP_KEYCODE_S) state_.input.pressed_button1 = true;
+        if (key_code == SAPP_KEYCODE_X) state_.input.pressed_button2 = true;
+        if (key_code == SAPP_KEYCODE_A) state_.input.pressed_button12 = true;
     };
 
     switch (ev->type) {
@@ -1259,9 +1270,12 @@ void DebuggerApp::event(const sapp_event* ev) {
             break;
         case SAPP_EVENTTYPE_MOUSE_DOWN:
             if (state_.mouse_captured_for_game) {
-                if (ev->mouse_button == SAPP_MOUSEBUTTON_LEFT) state_.input.mouse_button1 = true;
-                if (ev->mouse_button == SAPP_MOUSEBUTTON_RIGHT) state_.input.mouse_button2 = true;
-                if (ev->mouse_button == SAPP_MOUSEBUTTON_MIDDLE) state_.input.mouse_button12 = true;
+                if (ev->mouse_button == SAPP_MOUSEBUTTON_LEFT)
+                    state_.input.mouse_button1 = state_.input.pressed_button1 = true;
+                if (ev->mouse_button == SAPP_MOUSEBUTTON_RIGHT)
+                    state_.input.mouse_button2 = state_.input.pressed_button2 = true;
+                if (ev->mouse_button == SAPP_MOUSEBUTTON_MIDDLE)
+                    state_.input.mouse_button12 = state_.input.pressed_button12 = true;
             }
             break;
         case SAPP_EVENTTYPE_MOUSE_UP:

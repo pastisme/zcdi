@@ -31,6 +31,10 @@ struct InputState {
     bool keyboard_up = false;
     bool keyboard_down = false;
     int keyboard_dpad_held_frames = 0;
+    // Pressed since the last emulated frame, so a click released before it still counts.
+    bool pressed_button1 = false;
+    bool pressed_button2 = false;
+    bool pressed_button12 = false;
 };
 
 struct LaunchConfig {
