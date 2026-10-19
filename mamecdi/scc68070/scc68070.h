@@ -88,6 +88,9 @@ public:
 
     void uart_receive(uint8_t v);
     bool uart_receiver_enabled() const { return (uart_ucr_ & 3) == 1; }
+    // RTS (scc68070.sv bypass_uart_rts, !receiver enabled): true if it was
+    // high at any point since the last call, even if UCR re-enabled it since.
+    bool consume_uart_rts();
 
     // Channel 0 (CDIC), read and advanced by Bus::perform_cdic_dma.
     uint8_t dma_operation_control() const { return dma_[0].ocr; }
@@ -110,6 +113,9 @@ private:
     void write_dma(uint32_t addr, uint8_t v);
 
     std::string uart_output_;
+    // Set by a UCR write that disables the receiver. Consumed after every CPU
+    // chunk, so always clear between frames: not saved.
+    bool uart_rts_pulsed_ = false;
 };
 
 } // namespace mamecdi

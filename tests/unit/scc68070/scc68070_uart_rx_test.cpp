@@ -49,4 +49,27 @@ TEST_CASE("the receive interrupt needs the receiver enabled") {
     CHECK(scc.current_ipl() == 0);
 }
 
+TEST_CASE("RTS follows the receiver enable") {
+    Scc68070Periph scc;
+    CHECK(scc.consume_uart_rts());  // reset: receiver off
+    scc.write_byte(kUartUcr, 0x09);
+    CHECK_FALSE(scc.consume_uart_rts());
+    scc.write_byte(kUartUcr, 0x0a);
+    CHECK(scc.consume_uart_rts());
+    CHECK(scc.consume_uart_rts());  // still off
+}
+
+// u68070's SetStat writes UCR 0a, 40, then 09 within a few instructions.
+TEST_CASE("an RTS pulse between two calls is still reported once") {
+    Scc68070Periph scc;
+    scc.write_byte(kUartUcr, 0x09);
+    CHECK_FALSE(scc.consume_uart_rts());
+    scc.write_byte(kUartUcr, 0x0a);
+    scc.write_byte(kUartUcr, 0x40);
+    scc.write_byte(kUartUcr, 0x09);
+    CHECK(scc.uart_receiver_enabled());
+    CHECK(scc.consume_uart_rts());
+    CHECK_FALSE(scc.consume_uart_rts());
+}
+
 }  // TEST_SUITE

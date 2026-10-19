@@ -239,7 +239,7 @@ void Bus::set_tray_open(bool open) {
 void Bus::periph_tick(int cpu_cycles) {
     scc_.tick(cpu_cycles);
     // 7 data bits, as scc68070.sv bypass_uart_rx.
-    const int byte = pointer2_.tick(cpu_cycles, !scc_.uart_receiver_enabled());
+    const int byte = pointer2_.tick(cpu_cycles, scc_.consume_uart_rts());
     if (byte >= 0) scc_.uart_receive(uint8_t(byte & 0x7f));
     cdic_.tick_cycles(cpu_cycles);
     vmpeg_.tick_cycles(cpu_cycles);
