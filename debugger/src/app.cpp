@@ -1,6 +1,6 @@
 #include "app.h"
 
-#include "core/serial_pointer.h"
+#include "core/pointing_device.h"
 
 #include "widgets/breakpoints_widget.h"
 #include "widgets/cpu_widget.h"
@@ -217,23 +217,22 @@ void DebuggerApp::queue_audio_frame() {
 void DebuggerApp::step_emulation_frame() {
     if (!state_.machine) return;
 
-    const bool dpad_active = state_.input.keyboard_left || state_.input.keyboard_right || state_.input.keyboard_up ||
-                             state_.input.keyboard_down;
-    state_.input.keyboard_dpad_held_frames = dpad_active ? (state_.input.keyboard_dpad_held_frames + 1) : 0;
-    if (dpad_active) {
-        const int step = zcdi::SerialPointer::gamepad_speed_n_step(state_.input.keyboard_dpad_held_frames);
-        if (state_.input.keyboard_left) state_.input.dx -= step;
-        if (state_.input.keyboard_right) state_.input.dx += step;
-        if (state_.input.keyboard_up) state_.input.dy -= step;
-        if (state_.input.keyboard_down) state_.input.dy += step;
-    }
-
-    const bool button1 = state_.input.pressed_button1 || state_.input.mouse_button1 || state_.input.keyboard_key_z ||
-                         state_.input.keyboard_key_s;
-    const bool button2 = state_.input.pressed_button2 || state_.input.mouse_button2 || state_.input.keyboard_key_x;
+    zcdi::Bus& bus = state_.machine->bus();
+    bus.plug(zcdi::Bus::Socket::kFront, state_.front_mouse ? zcdi::DeviceId::kRelative : zcdi::DeviceId::kManeuvering);
     const bool button12 = state_.input.pressed_button12 || state_.input.mouse_button12 || state_.input.keyboard_key_a;
-
-    state_.machine->bus().update_pointer(state_.input.dx, state_.input.dy, button1, button2, button12);
+    bus.set_socket_input(zcdi::Bus::Socket::kFront,
+                         {
+                             .left = state_.input.keyboard_left,
+                             .right = state_.input.keyboard_right,
+                             .up = state_.input.keyboard_up,
+                             .down = state_.input.keyboard_down,
+                             .mouse_dx = state_.input.dx,
+                             .mouse_dy = state_.input.dy,
+                             .button1 = button12 || state_.input.pressed_button1 || state_.input.mouse_button1 ||
+                                        state_.input.keyboard_key_z || state_.input.keyboard_key_s,
+                             .button2 = button12 || state_.input.pressed_button2 || state_.input.mouse_button2 ||
+                                        state_.input.keyboard_key_x,
+                         });
     state_.input.dx = 0;
     state_.input.dy = 0;
     state_.input.pressed_button1 = false;
@@ -758,7 +757,7 @@ void* DebuggerApp::settings_open(ImGuiContext*, ImGuiSettingsHandler*, const cha
 }
 
 // Windows: "Title=0|1". Breakpoints: "hexaddress=0|1" (enabled). Recent: "bios=path", "disc=path".
-// Options: "auto_play=0|1", "tv_aspect=0|1".
+// Options: "auto_play=0|1", "tv_aspect=0|1", "front_mouse=0|1".
 void DebuggerApp::settings_read_line(ImGuiContext*, ImGuiSettingsHandler* handler, void* entry, const char* line) {
     auto* app = static_cast<DebuggerApp*>(handler->UserData);
     if (app && reinterpret_cast<std::uintptr_t>(entry) == kIniRecent) {
@@ -772,6 +771,7 @@ void DebuggerApp::settings_read_line(ImGuiContext*, ImGuiSettingsHandler* handle
     if (app && reinterpret_cast<std::uintptr_t>(entry) == kIniOptions) {
         if (std::strcmp(line, "auto_play=1") == 0) app->state_.auto_play = true;
         if (std::strcmp(line, "tv_aspect=1") == 0) app->state_.tv_aspect = true;
+        if (std::strcmp(line, "front_mouse=1") == 0) app->state_.front_mouse = true;
         return;
     }
     const char* eq = std::strrchr(line, '=');
@@ -806,8 +806,8 @@ void DebuggerApp::settings_write_all(ImGuiContext*, ImGuiSettingsHandler* handle
     for (const auto& widget : app->widgets_)
         out->appendf("%s=%d\n", widget->title(), widget->open ? 1 : 0);
     out->append("\n");
-    out->appendf("[%s][Options]\nauto_play=%d\ntv_aspect=%d\n\n", handler->TypeName, app->state_.auto_play ? 1 : 0,
-                 app->state_.tv_aspect ? 1 : 0);
+    out->appendf("[%s][Options]\nauto_play=%d\ntv_aspect=%d\nfront_mouse=%d\n\n", handler->TypeName,
+                 app->state_.auto_play ? 1 : 0, app->state_.tv_aspect ? 1 : 0, app->state_.front_mouse ? 1 : 0);
     if (!app->recent_bios_.empty() || !app->recent_discs_.empty()) {
         out->appendf("[%s][Recent]\n", handler->TypeName);
         if (!app->recent_bios_.empty()) out->appendf("bios=%s\n", app->recent_bios_.c_str());
@@ -912,6 +912,11 @@ void DebuggerApp::draw_menu_bar() {
         ImGui::SetItemTooltip(
             "Shows the picture with the shape it has on a TV instead of 4:3,\n"
             "from the player's pixel timing.");
+        if (ImGui::MenuItem("Front device: mouse", nullptr, &state_.front_mouse)) ImGui::MarkIniSettingsDirty();
+        ImGui::SetItemTooltip(
+            "A mouse ('M') instead of a gamepad ('J') in the front socket.\n"
+            "Both take the arrows and the captured mouse.\n"
+            "Plugging the other one makes the player detect it again.");
         ImGui::MenuItem("Mute audio", nullptr, &state_.muted);
         ImGui::EndMenu();
     }

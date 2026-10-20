@@ -70,7 +70,7 @@ TEST_CASE("channel 2 replies raise IN2 only between 0xf8 and 0xf9") {
 
     slave.write_byte(channel_addr(3), 0xf3);
     CHECK(slave.irq2_asserted());
-    CHECK(read_reply(slave) == 0xf302);
+    CHECK(read_reply(slave) == 0xf320); // $b6 before any device is detected
 
     slave.write_byte(channel_addr(3), 0xf9);
     slave.write_byte(channel_addr(3), 0xf4);

@@ -136,7 +136,8 @@ void Scc68070Periph::write_byte(uint32_t addr, uint8_t v) {
             return;
         case kUartUcr:
             uart_ucr_ = v;
-            if (!uart_receiver_enabled()) uart_rts_pulsed_ = true;
+            // Reset receiver (datasheet RCR 7:4 = 0010).
+            if ((v & 0x70) == 0x20) uart_rx_valid_ = false;
             return;
         case kUartUth:
             if (uart_output_.size() < kUartOutputCap) uart_output_.push_back(static_cast<char>(v));
@@ -277,13 +278,8 @@ int Scc68070Periph::iack(int level) {
 void Scc68070Periph::set_in2(bool asserted) { in2_ = asserted; }
 void Scc68070Periph::set_in4(bool asserted) { in4_ = asserted; }
 
-bool Scc68070Periph::consume_uart_rts() {
-    const bool rts = uart_rts_pulsed_ || !uart_receiver_enabled();
-    uart_rts_pulsed_ = false;
-    return rts;
-}
-
 void Scc68070Periph::uart_receive(uint8_t v) {
+    if (!uart_receiver_enabled()) return;
     uart_rhr_ = v;
     uart_rx_valid_ = true;
 }

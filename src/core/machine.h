@@ -45,8 +45,8 @@ public:
     // The audio produced since the last call; call once per run_frame().
     AudioStreams drain_audio();
 
-    // Video (video_framebuffer), input (update_pointer, set_pointer,
-    // set_pointer2_*) and NVRAM (nvram_data) are on the Bus.
+    // Video (video_framebuffer), input (plug, set_socket_input) and NVRAM
+    // (nvram_data) are on the Bus.
     Bus& bus() { return bus_; }
 
     // Takes ownership; replaces any mounted disc. False (no change) on null.

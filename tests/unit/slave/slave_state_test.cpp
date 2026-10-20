@@ -11,42 +11,46 @@ using zcdi_test::channel_addr;
 
 namespace {
 
-constexpr int kSlot = 15000000 / 120;
+constexpr long kOcTick = 15000000L * 256 / 500000 * 16;
 
-// Every IN2 report as (cycle, 4 bytes), draining it like the CPU would.
-std::vector<std::vector<long>> run(zcdi::mamecdi::SlaveHle& s, long cycles) {
-    std::vector<std::vector<long>> out;
-    for (long done = 0; done < cycles; done += 1000) {
-        s.tick_cycles(1000);
-        if (!s.irq2_asserted()) continue;
-        std::vector<long> r = {done};
-        for (int i = 0; i < 4; ++i) r.push_back(s.read_byte(channel_addr(0)));
-        out.push_back(r);
-    }
-    return out;
+void run(zcdi::mamecdi::SlaveHle& s, long cycles) {
+    for (long done = 0; done < cycles; done += 1000) s.tick_cycles(1000);
 }
 
 }  // namespace
 
 TEST_SUITE("slave") {
 
-TEST_CASE("a SLAVE restored mid-report sends the same reports") {
+TEST_CASE("a SLAVE restored mid-detection and mid-packet behaves the same") {
     zcdi::mamecdi::SlaveHle a;
-    a.write_byte(channel_addr(0), 0x83);  // enable polling
-    a.update_pointer(5, -3, true);
-    run(a, kSlot + 500);  // sampled, report still in flight
-
-    const std::vector<uint8_t> state = zcdi_test::save_state(a);
+    a.write_byte(channel_addr(0), 0x83);
+    run(a, 2 * kOcTick + 500);  // detecting
+    std::vector<uint8_t> state = zcdi_test::save_state(a);
     zcdi::mamecdi::SlaveHle b;
     REQUIRE(zcdi_test::load_state(b, state));
     CHECK(zcdi_test::save_state(b) == state);
 
-    a.update_pointer(2, 0, false);
-    b.update_pointer(2, 0, false);
-    const auto ra = run(a, 10L * kSlot);
-    const auto rb = run(b, 10L * kSlot);
-    CHECK(ra.size() == 2);
-    CHECK(rb == ra);
+    // Both go through the lost power-on byte, the 9600 baud try, then a 'J'.
+    auto drive = [](zcdi::mamecdi::SlaveHle& s) {
+        run(s, 4 * kOcTick);
+        s.sci_receive('J' | 0x80, false);
+        run(s, 6 * kOcTick);
+        s.sci_receive('J' | 0x80, true);
+        run(s, 6 * kOcTick);
+        s.sci_receive('J' | 0x80, false);
+        s.sci_receive(0x6c | 0x80, false);
+        s.sci_receive(0x05 | 0x80, false);  // mid-packet
+    };
+    drive(a);
+    drive(b);
+    state = zcdi_test::save_state(a);
+    CHECK(zcdi_test::save_state(b) == state);
+    zcdi::mamecdi::SlaveHle c;
+    REQUIRE(zcdi_test::load_state(c, state));
+    a.sci_receive(0x3d | 0x80, false);
+    c.sci_receive(0x3d | 0x80, false);
+    CHECK(zcdi_test::save_state(c) == zcdi_test::save_state(a));
+    CHECK(c.irq2_asserted());
 }
 
 TEST_CASE("a SLAVE state with an out-of-range command length is rejected") {

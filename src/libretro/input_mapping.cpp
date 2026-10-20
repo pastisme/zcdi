@@ -1,14 +1,14 @@
 #include "input_mapping.h"
 
 #include <cmath>
+#include <optional>
 
 #include "core/machine.h"
-#include "core/serial_pointer.h"
 
 namespace zcdi {
 
 // Not a real CD-i input; the speed range matches curve II's ceiling
-// (SerialPointer::gamepad_speed_n_step). Thresholds are on the magnitude, so
+// (PointingDevice::gamepad_speed_n_step). Thresholds are on the magnitude, so
 // diagonals aren't faster and the dead zone is round.
 constexpr double kAnalogDeadzone = 4096.0; // 12.5% of full scale
 constexpr double kAnalogSaturate = 29491.0; // ~90%: real sticks rarely reach 0x7fff
@@ -42,6 +42,12 @@ namespace {
 InputHistory g_history;
 bool g_input_bitmasks = false;
 
+// RetroArch defaults every port to a plain RetroPad.
+constexpr unsigned kSecondGamepad = RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_JOYPAD, 0);
+constexpr unsigned kSecondMouse = RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_MOUSE, 0);
+// The Peacekeeper's real ID is undocumented.
+constexpr DeviceId kLightgunId = DeviceId::kAbsoluteScreen;
+
 unsigned g_port0_device = RETRO_DEVICE_JOYPAD;
 unsigned g_port1_device = RETRO_DEVICE_NONE;
 
@@ -58,6 +64,38 @@ int lightgun_to_device(int16_t screen, int device_extent) {
     return int(pos < device_extent ? pos : device_extent - 1);
 }
 
+// SLAVE firmware 0x69c, 0x6c5.
+int slave_scaled_x(int x) { return (x >> 1) + (x >> 2); }
+int slave_scaled_y(int y) { return (y >> 1) + (y >> 4) + (y >> 5); }
+
+template <class Scale>
+int unscale(int target, Scale scale) {
+    int lo = 0, hi = 0x3ff;
+    while (lo < hi) {
+        const int mid = (lo + hi) / 2;
+        if (scale(mid) < target) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    return lo;
+}
+
+std::optional<DeviceId> device_for_port(unsigned port, unsigned device) {
+    if (port == 0) {
+        switch (device & RETRO_DEVICE_MASK) {
+            case RETRO_DEVICE_MOUSE: return DeviceId::kRelative;
+            case RETRO_DEVICE_LIGHTGUN: return kLightgunId;
+            case RETRO_DEVICE_NONE: return std::nullopt;
+            default: return DeviceId::kManeuvering;
+        }
+    }
+    if (device == kSecondGamepad) return DeviceId::kManeuvering;
+    if (device == kSecondMouse) return DeviceId::kRelative;
+    return std::nullopt;
+}
+
 void left_stick_delta(retro_input_state_t input_state_cb, unsigned port, int& out_dx, int& out_dy) {
     const int16_t x =
         input_state_cb(port, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_X);
@@ -66,41 +104,31 @@ void left_stick_delta(retro_input_state_t input_state_cb, unsigned port, int& ou
     analog_stick_delta(x, y, out_dx, out_dy);
 }
 
-void poll_lightgun_input(retro_input_state_t input_state_cb, unsigned port, Machine& machine) {
+PointingDevice::Input lightgun_input(retro_input_state_t input_state_cb, unsigned port) {
     auto gun = [&](unsigned id) { return input_state_cb(port, RETRO_DEVICE_LIGHTGUN, 0, id); };
-    bool offscreen = gun(RETRO_DEVICE_ID_LIGHTGUN_IS_OFFSCREEN) != 0;
-    // Off screen: the pointer stays, the buttons still work.
-    int x = g_history.prev_gun_x, y = g_history.prev_gun_y;
+    const bool offscreen = gun(RETRO_DEVICE_ID_LIGHTGUN_IS_OFFSCREEN) != 0;
     if (!offscreen) {
-        x = lightgun_to_device(gun(RETRO_DEVICE_ID_LIGHTGUN_SCREEN_X), kDeviceWidth);
-        y = lightgun_to_device(gun(RETRO_DEVICE_ID_LIGHTGUN_SCREEN_Y), kDeviceHeight);
+        g_history.gun_x = absolute_x_for(lightgun_to_device(gun(RETRO_DEVICE_ID_LIGHTGUN_SCREEN_X), kDeviceWidth));
+        g_history.gun_y = absolute_y_for(lightgun_to_device(gun(RETRO_DEVICE_ID_LIGHTGUN_SCREEN_Y), kDeviceHeight));
     }
-    bool button1 = gun(RETRO_DEVICE_ID_LIGHTGUN_TRIGGER) != 0;
-    bool button2 = gun(RETRO_DEVICE_ID_LIGHTGUN_AUX_A) != 0;
-
-    if (x >= 0) {
-        // Every frame: CD-RTOS moves the pointer itself (Set Pointer Position).
-        machine.bus().set_pointer(x, y, button1, button2, false);
-    } else if (button1 != g_history.prev_button1 || button2 != g_history.prev_button2 || g_history.prev_button12) {
-        // Never aimed at the screen yet: keep CD-RTOS's own position.
-        machine.bus().update_pointer(0, 0, button1, button2, false);
-    }
-    g_history.prev_gun_x = x;
-    g_history.prev_gun_y = y;
-    g_history.prev_button1 = button1;
-    g_history.prev_button2 = button2;
-    g_history.prev_button12 = false;
+    return {
+        .button1 = gun(RETRO_DEVICE_ID_LIGHTGUN_TRIGGER) != 0,
+        .button2 = gun(RETRO_DEVICE_ID_LIGHTGUN_AUX_A) != 0,
+        .abs_x = g_history.gun_x < 0 ? 0 : g_history.gun_x,
+        .abs_y = g_history.gun_y < 0 ? 0 : g_history.gun_y,
+        .in_area = !offscreen && g_history.gun_x >= 0,
+    };
 }
 
-// The back socket. Y is both buttons held: the serial report has no combo.
-void poll_serial_input(retro_input_state_t input_state_cb, unsigned port, Machine& machine) {
+// Y is both buttons.
+PointingDevice::Input relative_input(retro_input_state_t input_state_cb, unsigned port) {
     const uint16_t buttons = joypad_buttons(input_state_cb, port);
     auto pad = [&](unsigned id) { return bool((buttons >> id) & 1); };
     auto mouse = [&](unsigned id) { return input_state_cb(port, RETRO_DEVICE_MOUSE, 0, id); };
     int analog_dx = 0, analog_dy = 0;
     left_stick_delta(input_state_cb, port, analog_dx, analog_dy);
     const bool both = pad(RETRO_DEVICE_ID_JOYPAD_Y) || mouse(RETRO_DEVICE_ID_MOUSE_MIDDLE);
-    machine.bus().set_pointer2_input({
+    return {
         .left = pad(RETRO_DEVICE_ID_JOYPAD_LEFT),
         .right = pad(RETRO_DEVICE_ID_JOYPAD_RIGHT),
         .up = pad(RETRO_DEVICE_ID_JOYPAD_UP),
@@ -112,51 +140,23 @@ void poll_serial_input(retro_input_state_t input_state_cb, unsigned port, Machin
         .button1 =
             both || pad(RETRO_DEVICE_ID_JOYPAD_B) || pad(RETRO_DEVICE_ID_JOYPAD_X) || mouse(RETRO_DEVICE_ID_MOUSE_LEFT),
         .button2 = both || pad(RETRO_DEVICE_ID_JOYPAD_A) || mouse(RETRO_DEVICE_ID_MOUSE_RIGHT),
-    });
+    };
 }
 
-void poll_slave_input(retro_input_state_t input_state_cb, unsigned port, Machine& machine) {
-    if (port == 0 && (g_port0_device & RETRO_DEVICE_MASK) == RETRO_DEVICE_LIGHTGUN) {
-        poll_lightgun_input(input_state_cb, port, machine);
-        return;
-    }
-
-    int dx = 0, dy = 0;
-    const uint16_t buttons = joypad_buttons(input_state_cb, port);
-    auto pad = [&](unsigned id) { return bool((buttons >> id) & 1); };
-    auto mouse = [&](unsigned id) { return input_state_cb(port, RETRO_DEVICE_MOUSE, 0, id); };
-    bool dpad_left = pad(RETRO_DEVICE_ID_JOYPAD_LEFT);
-    bool dpad_right = pad(RETRO_DEVICE_ID_JOYPAD_RIGHT);
-    bool dpad_up = pad(RETRO_DEVICE_ID_JOYPAD_UP);
-    bool dpad_down = pad(RETRO_DEVICE_ID_JOYPAD_DOWN);
-    g_history.dpad_held_frames = (dpad_left || dpad_right || dpad_up || dpad_down) ? g_history.dpad_held_frames + 1 : 0;
-    int step = SerialPointer::gamepad_speed_n_step(g_history.dpad_held_frames);
-    if (dpad_left) dx -= step;
-    if (dpad_right) dx += step;
-    if (dpad_up) dy -= step;
-    if (dpad_down) dy += step;
-    dx += mouse(RETRO_DEVICE_ID_MOUSE_X);
-    dy += mouse(RETRO_DEVICE_ID_MOUSE_Y);
-
-    int analog_dx = 0, analog_dy = 0;
-    left_stick_delta(input_state_cb, port, analog_dx, analog_dy);
-    dx += analog_dx;
-    dy += analog_dy;
-
-    bool button1 = pad(RETRO_DEVICE_ID_JOYPAD_B) || pad(RETRO_DEVICE_ID_JOYPAD_X) || mouse(RETRO_DEVICE_ID_MOUSE_LEFT);
-    bool button2 = pad(RETRO_DEVICE_ID_JOYPAD_A) || mouse(RETRO_DEVICE_ID_MOUSE_RIGHT);
-    bool button12 = pad(RETRO_DEVICE_ID_JOYPAD_Y) || mouse(RETRO_DEVICE_ID_MOUSE_MIDDLE);
-
-    if (dx != 0 || dy != 0 || button1 != g_history.prev_button1 || button2 != g_history.prev_button2 ||
-        button12 != g_history.prev_button12) {
-        machine.bus().update_pointer(dx, dy, button1, button2, button12);
-    }
-    g_history.prev_button1 = button1;
-    g_history.prev_button2 = button2;
-    g_history.prev_button12 = button12;
+void poll_socket(retro_input_state_t input_state_cb, unsigned port, unsigned device, Bus::Socket socket,
+                 Machine& machine) {
+    const std::optional<DeviceId> id = device_for_port(port, device);
+    machine.bus().plug(socket, id);
+    if (!id) return;
+    const bool absolute = *id == DeviceId::kAbsoluteCoordinate || *id == DeviceId::kAbsoluteScreen;
+    machine.bus().set_socket_input(
+        socket, absolute ? lightgun_input(input_state_cb, port) : relative_input(input_state_cb, port));
 }
 
 } // namespace
+
+int absolute_x_for(int device_x) { return unscale(device_x, slave_scaled_x); }
+int absolute_y_for(int device_y) { return unscale(device_y, slave_scaled_y); }
 
 void query_input_bitmasks(retro_environment_t env) {
     g_input_bitmasks = env && env(RETRO_ENVIRONMENT_GET_INPUT_BITMASKS, nullptr);
@@ -179,16 +179,18 @@ uint16_t joypad_buttons(retro_input_state_t input_state_cb, unsigned port) {
 
 void set_controller_info(retro_environment_t env) {
     static const struct retro_controller_description port0_types[] = {
-        {"RetroPad / Mouse", RETRO_DEVICE_JOYPAD},
+        {"Gamepad", RETRO_DEVICE_JOYPAD},
+        {"Mouse", RETRO_DEVICE_MOUSE},
         {"Lightgun", RETRO_DEVICE_LIGHTGUN},
     };
     static const struct retro_controller_description port1_types[] = {
-        {"RetroPad / Mouse", RETRO_DEVICE_JOYPAD},
         {"None", RETRO_DEVICE_NONE},
+        {"Gamepad (2nd player)", kSecondGamepad},
+        {"Mouse (2nd player)", kSecondMouse},
     };
     static const struct retro_controller_info ports[] = {
-        {port0_types, 2},
-        {port1_types, 2},
+        {port0_types, 3},
+        {port1_types, 3},
         {nullptr, 0},
     };
     env(RETRO_ENVIRONMENT_SET_CONTROLLER_INFO, const_cast<struct retro_controller_info*>(ports));
@@ -198,9 +200,8 @@ void set_port_device(unsigned port, unsigned device) {
     if (port == 1) g_port1_device = device;
     if (port != 0) return;
     g_port0_device = device;
-    // A fresh device starts from CD-RTOS's current pointer position again.
-    g_history.prev_gun_x = -1;
-    g_history.prev_gun_y = -1;
+    g_history.gun_x = -1;
+    g_history.gun_y = -1;
 }
 
 void set_input_descriptors(retro_environment_t env) {
@@ -228,19 +229,10 @@ void set_input_descriptors(retro_environment_t env) {
     env(RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS, const_cast<struct retro_input_descriptor*>(desc));
 }
 
-// As CDi_MiSTer "P1 Back + P2 Front" with two players; a lightgun stays in
-// front, the only socket that takes one.
 void poll_pointer_input(retro_input_state_t input_state_cb, Machine& machine) {
     if (!input_state_cb) return;
-    const bool two_players = (g_port1_device & RETRO_DEVICE_MASK) == RETRO_DEVICE_JOYPAD;
-    machine.bus().set_pointer2_connected(two_players);
-    if (!two_players) {
-        poll_slave_input(input_state_cb, 0, machine);
-        return;
-    }
-    const bool port0_front = (g_port0_device & RETRO_DEVICE_MASK) == RETRO_DEVICE_LIGHTGUN;
-    poll_slave_input(input_state_cb, port0_front ? 0 : 1, machine);
-    poll_serial_input(input_state_cb, port0_front ? 1 : 0, machine);
+    poll_socket(input_state_cb, 0, g_port0_device, Bus::Socket::kFront, machine);
+    poll_socket(input_state_cb, 1, g_port1_device, Bus::Socket::kBack, machine);
 }
 
 InputHistory& input_history() { return g_history; }

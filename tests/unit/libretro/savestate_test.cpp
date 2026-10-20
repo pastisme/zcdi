@@ -33,8 +33,7 @@ struct Core {
     void advance(int16_t sample) {
         machine->run_frame();
         audio.push_samples(std::vector<int16_t>(2000, sample));
-        input.dpad_held_frames += 3;
-        input.prev_gun_x = sample;
+        input.gun_x = sample;
     }
 };
 
@@ -50,7 +49,7 @@ TEST_CASE("a core state restores the machine, audio queue and input history") {
     c.advance(200);
     REQUIRE(c.load(state));
     CHECK(zcdi_test::first_difference(c.save(), state) == -1);
-    CHECK(c.input.prev_gun_x == 100);
+    CHECK(c.input.gun_x == 100);
 }
 
 TEST_CASE("a damaged core state is rejected and changes nothing") {

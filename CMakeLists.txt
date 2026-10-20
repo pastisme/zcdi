@@ -34,7 +34,7 @@ set(ZCDI_SOURCES
     src/core/bus.cpp
     src/core/machine.cpp
     src/core/machine_inspector.cpp
-    src/core/serial_pointer.cpp
+    src/core/pointing_device.cpp
     src/core/cpu/musashi_core.cpp
     src/core/cpu/musashi_state.c
     src/disc/disc.cpp

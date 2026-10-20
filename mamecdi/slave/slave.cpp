@@ -1,5 +1,6 @@
 #include "slave/slave.h"
 
+#include "core/pointing_device.h"
 #include "core/state_archive.h"
 #include "core/util.h"
 
@@ -31,6 +32,7 @@ SlaveHle::SlaveHle() {
     // Power-on DAC programming: straight paths 0 dB, cross paths muted.
     apply_dacs();
     reset_dac_window();
+    start_detection(); // 0x1e7
 }
 
 template <class T>
@@ -50,6 +52,9 @@ bool SlaveHle::loaded() {
         if (c.out_pos < 0 || c.out_pos > c.out_len) return false;
     }
     if (tray_state_ > 9 || tray_timer_ < 0 || tray_timer_ > 255) return false;
+    const uint8_t type = uint8_t(front_type_);
+    if (type > uint8_t(FrontDeviceType::kAbsoluteScreen) && front_type_ != FrontDeviceType::kPowerOn) return false;
+    if (pc6_ > Pc6::kLow || detect_ticks_ > 5 || packet_count_ > 3) return false;
     return timer_cycle_accum_ >= 0 && timer_cycle_accum_ < kTimerTickCycles && data_count_ < 4;
 }
 
@@ -63,7 +68,6 @@ uint8_t SlaveHle::read_byte(uint32_t addr) {
     if (c.out_pos >= c.out_len) return 0xff; // idle -- matches MAME's uncommitted-read default
 
     uint8_t v = c.out[c.out_pos++];
-    if (c.out_pos == 1) irq2_ = false; // first read of a response acknowledges it
     if (c.out_pos >= c.out_len) {
         c.out_len = 0;
         c.out_pos = 0;
@@ -86,7 +90,11 @@ void SlaveHle::queue_response(int out_channel, const uint8_t* data, int len) {
         c.out[i] = data[i];
     c.out_len = len;
     c.out_pos = 0;
-    if (out_channel != 2 || reply_irq_enabled_) irq2_ = true;
+}
+
+bool SlaveHle::irq2_asserted() const {
+    auto busy = [this](int channel) { return channels_[channel].out_pos < channels_[channel].out_len; };
+    return (pointer_enabled_ && busy(0)) || (reply_irq_enabled_ && busy(2)) || (status_forwarding_ && busy(3));
 }
 
 void SlaveHle::queue_master_volume_reply() {
@@ -108,12 +116,10 @@ void SlaveHle::handle_write(int channel, uint8_t v) {
                     c.in_len = 1;
                     return;
                 }
-                // Enable/disable pointer input; the BIOS sends 0x83 after installing its handler (cdi220b 0x431b18).
-                // 0x80-0xbf decode on the low nibble alone (firmware 0x3b6), so 0x93 is 0x83.
+                // 0x80-0xbf decode on the low nibble (0x3b6).
                 if (v < 0x80) return;
                 if ((v & 0x0f) == 0x03) {
                     pointer_enabled_ = true;
-                    have_reported_ = false;
                     return;
                 }
                 if ((v & 0x0f) == 0x04) {
@@ -198,12 +204,11 @@ void SlaveHle::handle_write(int channel, uint8_t v) {
                         queue_response(2, r, 3);
                         return;
                     }
-                    // The real SLAVE firmware (as CDi_MiSTer runs it) replies 2; MAME's HLE guesses 1.
-                    case 0xf3: {
-                        uint8_t r[2] = {0xf3, 0x02};
+                    case 0xf3: { // 0x457
+                        uint8_t r[2] = {0xf3, uint8_t(front_type_)};
                         queue_response(2, r, 2);
                         return;
-                    } // pointer type
+                    }
                     case 0xf4: {
                         uint8_t r[2] = {0xf4, 0x00};
                         queue_response(2, r, 2);
@@ -219,7 +224,6 @@ void SlaveHle::handle_write(int channel, uint8_t v) {
                     }
                     case 0xf8: // sldriv init
                         reply_irq_enabled_ = true;
-                        if (channels_[2].out_pos < channels_[2].out_len) irq2_ = true;
                         return;
                     case 0xf9: reply_irq_enabled_ = false; return;
                     case 0xfa: // forward the servo's messages (disc status)
@@ -228,6 +232,11 @@ void SlaveHle::handle_write(int channel, uint8_t v) {
                     case 0xfb: // stop forwarding them
                         status_forwarding_ = false;
                         return;
+                    case 0xfc:
+                        pc6_ticks_ = 2;
+                        pc6_ = Pc6::kHigh;
+                        return;
+                    case 0xfd: pc6_ = Pc6::kReleased; return;
                     default:
                         // 0x80-0xef start a 4-byte command; all but 0x80/0x81 go to the servo
                         // (firmware 0x3da), e.g. through cdapdriv SetStat 0x52.
@@ -251,11 +260,14 @@ void SlaveHle::handle_write(int channel, uint8_t v) {
         return;
     }
     if (channel == 0 && c.in_len == 3) {
-        // Bit layout as same_cdi set_mouse_position(): seeds the position CD-RTOS drew the cursor at.
+        // Set Pointer Position (0x39d, 0xe5c).
         const uint8_t b0 = c.in[0];
         const uint8_t b1 = c.in[1];
         const uint8_t b2 = c.in[2];
-        set_pointer_position(((b1 & 0x70) << 3) | (b2 & 0x7f), ((b1 & 0x0f) << 6) | (b0 & 0x3f));
+        pointer_x_ = int16_t(((b1 & 0x70) << 3) | (b2 & 0x7f));
+        pointer_y_ = int16_t(((b1 & 0x0f) << 6) | (b0 & 0x3f));
+        channels_[0].out_len = 0;
+        channels_[0].out_pos = 0;
         c.in_len = 0;
         return;
     }
@@ -344,30 +356,7 @@ void SlaveHle::tick_frame() {
     enter_tray_state(kTrayNextState[tray_state_]);
 }
 
-void SlaveHle::update_pointer(int dx, int dy, bool button1, bool button2, bool button12) {
-    set_pointer(pointer_x_ + dx, pointer_y_ + dy, button1, button2, button12);
-}
-
-void SlaveHle::set_pointer_position(int x, int y) {
-    pointer_x_ = int16_t(std::clamp(x, 0, 767));
-    pointer_y_ = int16_t(std::clamp(y, 0, 559));
-}
-
-void SlaveHle::set_pointer(int x, int y, bool button1, bool button2, bool button12) {
-    set_pointer_position(x, y);
-    uint8_t button_bits = 0x01;
-    if (button1) button_bits |= 0x02;
-    if (button2) button_bits |= 0x04;
-    if (button12) button_bits |= 0x06;
-    button_bits_ = button_bits;
-}
-
 void SlaveHle::tick_cycles(int cpu_cycles) {
-    slot_cycle_accum_ += cpu_cycles;
-    while (slot_cycle_accum_ >= kPointerSlotCycles) {
-        slot_cycle_accum_ -= kPointerSlotCycles;
-        on_pointer_slot();
-    }
     // Timer ticks run at their own cycle so DAC changes land there in the attenuate() window.
     int left = cpu_cycles;
     while (timer_cycle_accum_ + left >= kTimerTickCycles) {
@@ -394,11 +383,24 @@ uint8_t SlaveHle::fade_gain() const {
     return kFadeGain[muted_ ? elapsed : kFadeTicks - 1 - elapsed];
 }
 
-// $1a tick: fade step; every 16 ticks the output compare master ramp (0x9c7).
+// $1a tick.
 void SlaveHle::timer_tick() {
     ++timer_high_;
     if (fading_) fade_step();
-    if ((timer_high_ & 0x0f) != 0 || !master_enabled_) return;
+    if ((timer_high_ & 0x0f) == 0) output_compare_tick();
+}
+
+void SlaveHle::output_compare_tick() {
+    if (detect_ticks_ != 0) {
+        if (--detect_ticks_ == 0) {
+            sci_receiving_ = true;
+            front_rts_negated_ = false;
+        }
+    }
+    if (pc6_ticks_ != 0 && --pc6_ticks_ == 0) pc6_ = Pc6::kLow;
+
+    // Master volume ramp (0x9c7).
+    if (!master_enabled_) return;
     if (ramp_count_ != 0) {
         --ramp_count_;
         return;
@@ -517,30 +519,135 @@ void SlaveHle::reset_dac_window() {
     window_cycles_ = 0;
 }
 
-void SlaveHle::on_pointer_slot() {
-    if (report_slots_left_ > 0) {
-        if (--report_slots_left_ == 0) {
-            // Byte 0 has bit 7 set (firmware 0xe27: 0x88 | buttons | x high bits).
-            const uint8_t report[4] = {
-                uint8_t(0x80 | ((reported_x_ & 0x380) >> 7) | (reported_button_bits_ << 3)),
-                uint8_t(reported_x_ & 0x7f),
-                uint8_t((reported_y_ & 0x380) >> 7),
-                uint8_t(reported_y_ & 0x7f),
-            };
-            queue_response(0, report, 4);
+void SlaveHle::start_detection() {
+    if (flip_baud_) {
+        flip_baud_ = false;
+        sci_9600_ = !sci_9600_; // 0x25c
+    }
+    sci_receiving_ = false;
+    front_rts_negated_ = true;
+    detect_ticks_ = 5;
+}
+
+void SlaveHle::device_lost() {
+    front_type_ = FrontDeviceType::kNone;
+    flip_baud_ = true;
+    sync_lost_once_ = false;
+    start_detection();
+}
+
+// SCI interrupt (0x6f9).
+void SlaveHle::sci_receive(uint8_t byte, bool framing_error) {
+    if (!sci_receiving_) return;
+    if (framing_error) {
+        device_lost();
+        return;
+    }
+    const uint8_t v = byte & 0x7f;
+    switch (front_type_) {
+        case FrontDeviceType::kNone:
+            switch (DeviceId(v)) {
+                case DeviceId::kRelative: front_type_ = FrontDeviceType::kRelative; return;
+                case DeviceId::kManeuvering: front_type_ = FrontDeviceType::kManeuvering; return;
+                case DeviceId::kAbsoluteCoordinate: front_type_ = FrontDeviceType::kAbsoluteCoordinate; return;
+                case DeviceId::kAbsoluteScreen: front_type_ = FrontDeviceType::kAbsoluteScreen; return;
+                default: device_lost(); return;
+            }
+        case FrontDeviceType::kRelative:
+        case FrontDeviceType::kManeuvering: relative_byte(v); return;
+        case FrontDeviceType::kAbsoluteCoordinate:
+        case FrontDeviceType::kAbsoluteScreen: absolute_byte(v); return;
+        default: device_lost(); return;
+    }
+}
+
+namespace {
+// 0x7a8.
+uint8_t report_buttons(uint8_t v) { return uint8_t((v & 0x10 ? 0x20 : 0) | (v & 0x20 ? 0x10 : 0)); }
+} // namespace
+
+// 0x781.
+void SlaveHle::relative_byte(uint8_t v) {
+    const uint8_t count = packet_count_++;
+    if (v & 0x40) {
+        packet_count_ = 0;
+        if (count == 2) {
+            sync_lost_once_ = false;
+        } else if (sync_lost_once_) {
+            device_lost();
+            return;
+        } else {
+            sync_lost_once_ = true;
         }
+        packet_buttons_ = report_buttons(v);
+        packet_x_ = uint16_t((v & 0x03) << 6);
+        packet_y_ = uint16_t((v & 0x0c) << 4);
         return;
     }
-    if (!pointer_enabled_) return;
-    if (have_reported_ && button_bits_ == reported_button_bits_ && pointer_x_ == reported_x_ &&
-        pointer_y_ == reported_y_) {
+    if (count == 0) {
+        packet_x_ |= v;
         return;
     }
-    have_reported_ = true;
-    reported_button_bits_ = button_bits_;
-    reported_x_ = pointer_x_;
-    reported_y_ = pointer_y_;
-    report_slots_left_ = 2; // first byte goes out on this slot
+    if (count != 1) {
+        device_lost(); // 0x7c4
+        return;
+    }
+    packet_y_ |= v;
+    // Main loop 0xd90.
+    pointer_x_ = int16_t(std::clamp(pointer_x_ + int8_t(packet_x_), 0, 0x2ff));
+    pointer_y_ = int16_t(std::clamp(pointer_y_ + int8_t(packet_y_), 0, 0x22f));
+    buttons_ = packet_buttons_;
+    publish_pointer();
+}
+
+// 0x719.
+void SlaveHle::absolute_byte(uint8_t v) {
+    const uint8_t count = packet_count_++;
+    if (v & 0x40) {
+        packet_count_ = 0;
+        if (count == 0) {
+            sync_lost_once_ = false;
+        } else if (sync_lost_once_) {
+            device_lost();
+            return;
+        } else {
+            sync_lost_once_ = true;
+        }
+        packet_buttons_ = report_buttons(v);
+        packet_x_ = uint16_t((v & 0x0f) << 6);
+        return;
+    }
+    switch (count) {
+        case 0:
+            if (v >= 0x20) packet_buttons_ |= 0x08;
+            packet_y_ = uint16_t((v & 0x0f) << 6);
+            return;
+        case 1: {
+            const int x = packet_x_ | (v & 0x3f);
+            packet_x_ = uint16_t((x >> 1) + (x >> 2));
+            return;
+        }
+        case 2: {
+            const int y = packet_y_ | (v & 0x3f);
+            pointer_x_ = int16_t(packet_x_);
+            pointer_y_ = int16_t((y >> 1) + (y >> 4) + (y >> 5));
+            buttons_ = packet_buttons_;
+            packet_count_ = 0;
+            publish_pointer();
+            return;
+        }
+        default: device_lost(); return;
+    }
+}
+
+void SlaveHle::publish_pointer() {
+    const uint8_t report[4] = {
+        uint8_t(0x88 | buttons_ | ((pointer_x_ >> 7) & 0x07)),
+        uint8_t(pointer_x_ & 0x7f),
+        uint8_t((pointer_y_ >> 7) & 0x07),
+        uint8_t(pointer_y_ & 0x7f),
+    };
+    queue_response(0, report, 4);
 }
 
 } // namespace mamecdi

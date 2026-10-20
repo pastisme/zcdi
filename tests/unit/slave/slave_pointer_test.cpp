@@ -1,168 +1,180 @@
-// Paced like the 1200-baud device (CDi_MiSTer pointing_device.sv).
+// The front socket device on the SLAVE's SCI, after firmware 2.0 (slave20.asm
+// 0x67a SCI interrupt, 0xd90 pointer, 0xe0d report, 0x961 timer).
 #include "doctest.h"
 
 #include <cstdint>
 #include <vector>
 
+#include "core/pointing_device.h"
 #include "slave/slave.h"
 #include "support/slave_rig.h"
 
+using zcdi::mamecdi::FrontDeviceType;
+using zcdi::mamecdi::Pc6;
+using zcdi::mamecdi::SlaveHle;
 using zcdi_test::channel_addr;
 
 namespace {
 
-constexpr int kSlot = 15000000 / 120;       // cycles per serial byte slot
-constexpr int kFrame = 15000000 / 50;       // PAL frame
-constexpr int kStep = 1000;
+// One 8.19 ms output compare tick: 16 ticks of the 0.5 MHz counter's high byte.
+constexpr long kOcTick = 15000000L * 256 / 500000 * 16;
 
-struct Report {
-    long cycle;
-    bool button1;
-    int x;
-};
+void run(SlaveHle& s, long cycles) {
+    for (long done = 0; done < cycles; done += 1000) s.tick_cycles(1000);
+}
 
-struct Harness {
-    zcdi::mamecdi::SlaveHle slave;
-    long cycle = 0;
-    std::vector<Report> reports;
+// Waits out a detection cycle: RTS high, then low after 5 ticks.
+void finish_detection(SlaveHle& s) {
+    REQUIRE(s.front_rts_negated());
+    run(s, 5 * kOcTick + 1000);
+    REQUIRE(!s.front_rts_negated());
+}
 
-    explicit Harness(bool enable_polling = true) {
-        if (enable_polling) slave.write_byte(channel_addr(0), 0x83);
-    }
-    // Advances in small steps, draining each report the moment it's raised
-    // (the CPU's IN2 handler reads it well within one slot on hardware).
-    void run(long cycles) {
-        for (long done = 0; done < cycles; done += kStep) {
-            slave.tick_cycles(kStep);
-            cycle += kStep;
-            if (!slave.irq2_asserted()) continue;
-            uint8_t b[4];
-            for (int i = 0; i < 4; ++i) b[i] = slave.read_byte(channel_addr(0));
-            reports.push_back({cycle, (b[0] & (0x02 << 3)) != 0, ((b[0] & 0x07) << 7) | b[1]});
-        }
-    }
-};
+uint8_t front_type(SlaveHle& s) {
+    s.write_byte(channel_addr(3), 0xf3);
+    REQUIRE(s.read_byte(channel_addr(2)) == 0xf3);
+    return s.read_byte(channel_addr(2));
+}
+
+void send(SlaveHle& s, std::vector<uint8_t> bytes) {
+    for (uint8_t b : bytes) s.sci_receive(uint8_t(b | 0x80), false);
+}
+
+// Through the power-on cycle (the first byte is lost) and the 9600 baud one
+// (a 1200 baud device gives a framing error), to an identified device.
+SlaveHle identified(zcdi::DeviceId id) {
+    SlaveHle s;
+    finish_detection(s);
+    send(s, {uint8_t(id)});
+    CHECK(s.sci_at_9600_baud());
+    finish_detection(s);
+    s.sci_receive(uint8_t(id) | 0x80, true);
+    CHECK(!s.sci_at_9600_baud());
+    finish_detection(s);
+    send(s, {uint8_t(id)});
+    return s;
+}
+
+std::vector<uint8_t> read_report(SlaveHle& s) {
+    std::vector<uint8_t> r;
+    for (int i = 0; i < 4; ++i) r.push_back(s.read_byte(channel_addr(0)));
+    return r;
+}
 
 }  // namespace
 
 TEST_SUITE("slave") {
 
-// 5 PAL frames = 12 slots, so phases 0-4 cover the grid.
-TEST_CASE("one-frame taps at every slot phase") {
-    int reported = 0;
-    for (int phase = 0; phase < 5; ++phase) {
-        CAPTURE(phase);
-        Harness h;
-        h.run(long(kFrame) * (4 + phase));
-        h.slave.update_pointer(0, 0, true);
-        h.run(kFrame);
-        h.slave.update_pointer(0, 0, false);
-        h.run(long(kFrame) * 5);
-        const Report* down = nullptr;
-        const Report* up = nullptr;
-        for (const Report& r : h.reports) {
-            if (r.button1 && !down) down = &r;
-            if (!r.button1 && down && !up) up = &r;
-        }
-        if (!down) continue;
-        ++reported;
-        CHECK(up != nullptr);
-        if (up) CHECK(up->cycle - down->cycle >= 3 * kSlot - kStep);
-    }
-    // 20 ms taps against a 25 ms sample period: most, not all, are seen.
-    CHECK(reported >= 3);
+TEST_CASE("the front device is identified on the third detection cycle") {
+    SlaveHle s;
+    CHECK(front_type(s) == uint8_t(FrontDeviceType::kPowerOn));
+    s.sci_receive('J' | 0x80, false);  // ignored: RTS still holds the device
+    CHECK(s.front_rts_negated());
+    SlaveHle t = identified(zcdi::DeviceId::kManeuvering);
+    CHECK(front_type(t) == uint8_t(FrontDeviceType::kManeuvering));
+    CHECK(!t.front_rts_negated());
 }
 
-TEST_CASE("two-frame taps are always reported") {
-    for (int phase = 0; phase < 5; ++phase) {
-        CAPTURE(phase);
-        Harness h;
-        h.run(long(kFrame) * (4 + phase));
-        h.slave.update_pointer(0, 0, true);
-        h.run(2L * kFrame);
-        h.slave.update_pointer(0, 0, false);
-        h.run(long(kFrame) * 5);
-        bool down = false;
-        for (const Report& r : h.reports) down |= r.button1;
-        CHECK(down);
-    }
+TEST_CASE("every ID maps to its type; anything else loses the device") {
+    SlaveHle m = identified(zcdi::DeviceId::kRelative);
+    CHECK(front_type(m) == 1);
+    SlaveHle t = identified(zcdi::DeviceId::kAbsoluteCoordinate);
+    CHECK(front_type(t) == 3);
+    SlaveHle a = identified(zcdi::DeviceId::kAbsoluteScreen);
+    CHECK(front_type(a) == 4);
+    SlaveHle s;
+    finish_detection(s);
+    send(s, {'J'});
+    finish_detection(s);
+    s.sci_receive('J' | 0x80, true);
+    finish_detection(s);
+    send(s, {'X'});
+    CHECK(front_type(s) == 0);
+    CHECK(s.front_rts_negated());
 }
 
-TEST_CASE("changes during transmission go to the next report") {
-    Harness h;
-    h.run(10L * kSlot);           // idle, nothing to report yet (no change)
-    size_t before = h.reports.size();
-    h.slave.update_pointer(5, 0, true);
-    h.run(kSlot);                 // sampled at the next slot boundary
-    h.slave.update_pointer(7, 0, false);
-    h.run(10L * kSlot);
-    REQUIRE(h.reports.size() == before + 2);
-    const Report& first = h.reports[before];
-    const Report& second = h.reports[before + 1];
-    CHECK(first.button1);
-    CHECK(first.x == 5);
-    CHECK(!second.button1);
-    CHECK(second.x == 12);
-    CHECK(second.cycle - first.cycle >= 3 * kSlot - kStep);
+TEST_CASE("relative packets move the pointer 1:1, clamped, and every packet is reported") {
+    SlaveHle s = identified(zcdi::DeviceId::kManeuvering);
+    s.write_byte(channel_addr(0), 0x83);
+    // dx +5, dy -3, button 1.
+    send(s, {0x6c, 0x05, 0x3d});
+    CHECK(s.irq2_asserted());
+    CHECK(read_report(s) == std::vector<uint8_t>{0x98, 0x05, 0x00, 0x00});  // y clamped at 0
+    CHECK(!s.irq2_asserted());
+    send(s, {0x40, 0x00, 0x00});  // no motion: still a report
+    CHECK(read_report(s) == std::vector<uint8_t>{0x88, 0x05, 0x00, 0x00});
+    for (int i = 0; i < 10; ++i) send(s, {0x55, 0x3f, 0x3f});  // +127, +127, button 2
+    CHECK(read_report(s) == std::vector<uint8_t>{0xad, 0x7f, 0x04, 0x2f});  // 767, 559
 }
 
-TEST_CASE("one tick spanning many slots runs every boundary") {
-    zcdi::mamecdi::SlaveHle slave;
-    slave.write_byte(channel_addr(0), 0x83);
-    slave.update_pointer(3, 0, true);
-    slave.tick_cycles(2 * kSlot);
-    CHECK(!slave.irq2_asserted());  // sampled, still transmitting
-    slave.tick_cycles(8 * kSlot);
-    CHECK(slave.irq2_asserted());
-    uint8_t b0 = slave.read_byte(channel_addr(0));
-    CHECK((b0 & (0x02 << 3)) != 0);
-    CHECK((b0 & 0x80) != 0);  // firmware 0xe27 ors in 0x88
+TEST_CASE("IN2 waits for 0x83; a report already waiting raises it then") {
+    SlaveHle s = identified(zcdi::DeviceId::kRelative);
+    send(s, {0x40, 0x01, 0x01});
+    CHECK(!s.irq2_asserted());
+    s.write_byte(channel_addr(0), 0x93);  // decoded on the low nibble: 0x83
+    CHECK(s.irq2_asserted());
+    s.write_byte(channel_addr(0), 0x84);
+    CHECK(!s.irq2_asserted());
 }
 
-TEST_CASE("pointer enable decodes on the low nibble") {
-    Harness h(false);
-    h.slave.update_pointer(10, 10, true);
-    h.slave.write_byte(channel_addr(0), 0x93);  // 0x83 to the firmware
-    h.run(20L * kSlot);
-    REQUIRE(h.reports.size() == 1);
-    h.slave.write_byte(channel_addr(0), 0xb4);  // 0x84
-    h.slave.update_pointer(5, 0, false);
-    h.run(20L * kSlot);
-    CHECK(h.reports.size() == 1);
+TEST_CASE("one cut packet is tolerated, a second in a row loses the device") {
+    SlaveHle s = identified(zcdi::DeviceId::kManeuvering);
+    send(s, {0x40, 0x00, 0x00});
+    send(s, {0x40, 0x01});  // cut
+    send(s, {0x40, 0x00, 0x00});
+    CHECK(front_type(s) == 2);
+    send(s, {0x40, 0x40, 0x40});  // a good sync, then two cut packets
+    CHECK(front_type(s) == 0);
+    CHECK(s.front_rts_negated());
 }
 
-TEST_CASE("no reports before pointer input is enabled, or after it's disabled") {
-    Harness h(false);
-    h.slave.update_pointer(10, 10, true);
-    h.slave.write_byte(channel_addr(3), 0xf7);  // developer mode, not an enable
-    h.run(20L * kSlot);
-    CHECK(h.reports.empty());
-
-    h.slave.write_byte(channel_addr(0), 0x83);
-    h.run(20L * kSlot);
-    REQUIRE(h.reports.size() == 1);  // the current state, unchanged since
-    CHECK(h.reports[0].x == 10);
-
-    h.slave.write_byte(channel_addr(0), 0x84);
-    h.slave.update_pointer(5, 0, false);
-    h.run(20L * kSlot);
-    CHECK(h.reports.size() == 1);
+TEST_CASE("absolute packets are scaled to 3/4 X and 19/32 Y, not clamped") {
+    SlaveHle s = identified(zcdi::DeviceId::kAbsoluteScreen);
+    s.write_byte(channel_addr(0), 0x83);
+    send(s, {0x6f, 0x2f, 0x3f, 0x3f});  // 1023, 1023, button 1, pen down
+    // 766, 605: x 101 1111110, y 100 1011101; pd shows as bit 3, which 0x88 sets anyway
+    CHECK(read_report(s) == std::vector<uint8_t>{0x9d, 0x7e, 0x04, 0x5d});
 }
 
-TEST_CASE("absolute position (lightgun)") {
-    Harness h;
-    h.slave.set_pointer(700, 300, false);
-    h.run(10L * kSlot);
-    CHECK(h.reports.size() == 1);
-    if (!h.reports.empty()) CHECK(h.reports.back().x == 700);
-    h.slave.set_pointer(700, 300, false);
-    h.run(10L * kSlot);
-    CHECK(h.reports.size() == 1);
-    h.slave.set_pointer(5000, -20, true);
-    h.run(10L * kSlot);
-    REQUIRE(h.reports.size() == 2);
-    CHECK(h.reports.back().x == 767);
-    CHECK(h.reports.back().button1);
+TEST_CASE("Set Pointer Position moves the pointer and drops the unread report") {
+    SlaveHle s = identified(zcdi::DeviceId::kManeuvering);
+    s.write_byte(channel_addr(0), 0x83);
+    send(s, {0x40, 0x01, 0x00});
+    CHECK(s.irq2_asserted());
+    // x = 0x123 (010 0100011), y = 0x1a5 (0110 100101): 11 y5-0, 0 x9-7 y9-6, 0 x6-0.
+    s.write_byte(channel_addr(0), 0xc0 | 0x25);
+    s.write_byte(channel_addr(0), 0x20 | 0x06);
+    s.write_byte(channel_addr(0), 0x23);
+    CHECK(!s.irq2_asserted());
+    send(s, {0x40, 0x00, 0x00});
+    CHECK(read_report(s) == std::vector<uint8_t>{0x8a, 0x23, 0x03, 0x25});
+}
+
+TEST_CASE("0xfc drives PC6 high for 2 ticks then low; 0xfd releases it") {
+    SlaveHle s;
+    CHECK(s.state().pc6_ == Pc6::kReleased);
+    CHECK(s.back_rts_negated());
+    s.write_byte(channel_addr(3), 0xfc);
+    CHECK(s.state().pc6_ == Pc6::kHigh);
+    run(s, 2 * kOcTick + 1000);
+    CHECK(s.state().pc6_ == Pc6::kLow);
+    CHECK(!s.back_rts_negated());
+    s.write_byte(channel_addr(3), 0xfd);
+    CHECK(s.back_rts_negated());
+}
+
+TEST_CASE("IN2 stays up while another enabled channel has a reply") {
+    SlaveHle s = identified(zcdi::DeviceId::kManeuvering);
+    s.write_byte(channel_addr(0), 0x83);
+    s.write_byte(channel_addr(3), 0xf8);  // channel 2 replies raise IN2
+    s.write_byte(channel_addr(3), 0xf4);
+    send(s, {0x40, 0x00, 0x00});
+    CHECK(s.read_byte(channel_addr(2)) == 0xf4);
+    CHECK(s.irq2_asserted());
+    s.read_byte(channel_addr(2));
+    CHECK(s.irq2_asserted());  // the pointer report is still waiting
+    read_report(s);
+    CHECK(!s.irq2_asserted());
 }
 
 }  // TEST_SUITE

@@ -1,12 +1,13 @@
 #pragma once
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
 
 #include "cdic/cdic.h"
-#include "core/serial_pointer.h"
+#include "core/pointing_device.h"
 #include "disc/disc.h"
 #include "dvc/dvc_audio.h"
 #include "dvc/dvc_video.h"
@@ -146,15 +147,13 @@ public:
     // Audio since the last drain, one stream per source; Mixer sums them.
     AudioStreams drain_audio();
 
-    // Once per frame with the accumulated delta, only when something changed.
-    void update_pointer(int dx, int dy, bool button1, bool button2 = false, bool button12 = false);
-    // Absolute variant (lightgun), in the SLAVE's device space.
-    void set_pointer(int x, int y, bool button1, bool button2 = false, bool button12 = false);
-
-    // The back-socket pointer on the SCC68070 UART. Input is set once per
-    // frame, before the frame runs.
-    void set_pointer2_connected(bool connected) { pointer2_.set_connected(connected); }
-    void set_pointer2_input(const SerialPointer::Input& input) { pointer2_.set_input(input); }
+    // Front "INPUT" on the SLAVE's SCI, back "INPUT 2" on the SCC68070 UART.
+    enum class Socket : uint8_t { kFront, kBack };
+    // Not saved; the same type keeps the plugged device.
+    void plug(Socket socket, std::optional<DeviceId> id);
+    std::optional<DeviceId> plugged(Socket socket) const;
+    // Once per frame, before run_frame().
+    void set_socket_input(Socket socket, const PointingDevice::Input& input);
 
     // Returns the CPU interrupt level; Machine polls it after every CPU chunk.
     int update_interrupts();
@@ -204,7 +203,14 @@ private:
     mamecdi::Mcd212 mcd212_; // 0x4fffe0-0x4fffff
     mamecdi::Scc68070Periph scc_; // 0x80000000+
     mamecdi::SlaveHle slave_; // 0x310000-0x317fff
-    SerialPointer pointer2_; // on the SCC68070 UART
+    std::optional<PointingDevice> front_device_;
+    std::optional<PointingDevice> back_device_;
+    std::optional<PointingDevice>& socket(Socket s) { return s == Socket::kFront ? front_device_ : back_device_; }
+    const std::optional<PointingDevice>& socket(Socket s) const {
+        return s == Socket::kFront ? front_device_ : back_device_;
+    }
+    template <class T>
+    void socket_state_io(T& archive, Socket s);
     mamecdi::Cdic cdic_; // 0x300000-0x303fff
     mamecdi::VmpegDevice vmpeg_; // 0xe00000-0xe3ffff, FMA/FMV registers
     dvc::DvcVideo dvc_video_;

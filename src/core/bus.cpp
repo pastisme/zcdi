@@ -172,7 +172,8 @@ void Bus::state_io(T& archive) {
     scc_.state_io(archive);
     mcd212_.state_io(archive);
     slave_.state_io(archive);
-    pointer2_.state_io(archive);
+    socket_state_io(archive, Socket::kFront);
+    socket_state_io(archive, Socket::kBack);
     cdic_.state_io(archive);
     vmpeg_.state_io(archive);
     nvram_.state_io(archive);
@@ -238,9 +239,16 @@ void Bus::set_tray_open(bool open) {
 
 void Bus::periph_tick(int cpu_cycles) {
     scc_.tick(cpu_cycles);
-    // 7 data bits, as scc68070.sv bypass_uart_rx.
-    const int byte = pointer2_.tick(cpu_cycles, scc_.consume_uart_rts());
-    if (byte >= 0) scc_.uart_receive(uint8_t(byte & 0x7f));
+    if (front_device_) {
+        // Devices send at 1200 baud.
+        const int byte = front_device_->tick(cpu_cycles, slave_.front_rts_negated());
+        if (byte >= 0) slave_.sci_receive(uint8_t(byte), slave_.sci_at_9600_baud());
+    }
+    if (back_device_) {
+        // 7 data bits, as scc68070.sv bypass_uart_rx.
+        const int byte = back_device_->tick(cpu_cycles, slave_.back_rts_negated());
+        if (byte >= 0) scc_.uart_receive(uint8_t(byte & 0x7f));
+    }
     cdic_.tick_cycles(cpu_cycles);
     vmpeg_.tick_cycles(cpu_cycles);
     nvram_.tick_cycles(cpu_cycles);
@@ -253,12 +261,46 @@ void Bus::slave_tick_frame() {
     if (slave_.tray_closed() != was_closed) sync_tray();
 }
 
-void Bus::update_pointer(int dx, int dy, bool button1, bool button2, bool button12) {
-    slave_.update_pointer(dx, dy, button1, button2, button12);
+void Bus::plug(Socket s, std::optional<DeviceId> id) {
+    std::optional<PointingDevice>& device = socket(s);
+    if (device && id && device->id() == *id) return;
+    if (id) {
+        device.emplace(*id);
+    } else {
+        device.reset();
+    }
 }
 
-void Bus::set_pointer(int x, int y, bool button1, bool button2, bool button12) {
-    slave_.set_pointer(x, y, button1, button2, button12);
+std::optional<DeviceId> Bus::plugged(Socket s) const {
+    const std::optional<PointingDevice>& device = socket(s);
+    if (!device) return std::nullopt;
+    return device->id();
+}
+
+void Bus::set_socket_input(Socket s, const PointingDevice::Input& input) {
+    if (std::optional<PointingDevice>& device = socket(s)) device->set_input(input);
+}
+
+// A state made with another device keeps the current one, freshly plugged.
+template <class T>
+void Bus::socket_state_io(T& archive, Socket s) {
+    std::optional<PointingDevice>& device = socket(s);
+    archive.begin_section(state_tag("SOCK"));
+    bool present = device.has_value();
+    uint8_t id = present ? uint8_t(device->id()) : 0;
+    archive.io(present);
+    archive.io(id);
+    if constexpr (T::kLoading) {
+        if (present && device && uint8_t(device->id()) == id) {
+            device->state_io(archive);
+        } else {
+            if (present) PointingDevice(DeviceId(id)).state_io(archive);
+            if (device) device.emplace(device->id());
+        }
+    } else if (present) {
+        device->state_io(archive);
+    }
+    archive.end_section();
 }
 
 AudioStreams Bus::drain_audio() {

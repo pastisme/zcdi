@@ -188,12 +188,17 @@ void draw_scc68070(const zcdi::mamecdi::Scc68070Periph& scc) {
 void draw_slave(const zcdi::mamecdi::SlaveHle& slave) {
     const zcdi::mamecdi::SlaveSaveState& s = slave.state();
     if (ImGui::CollapsingHeader("State", ImGuiTreeNodeFlags_DefaultOpen) && begin_fields("slave_state")) {
-        field("IRQ2", "%s", yes(s.irq2_));
+        field("IRQ2", "%s", yes(slave.irq2_asserted()));
         field("Tray open", "%s", yes(s.tray_open_));
         field("Status forwarding", "%s", yes(s.status_forwarding_));
         field("Pointer", "%s  at %d, %d  buttons %02X", s.pointer_enabled_ ? "on" : "off", s.pointer_x_, s.pointer_y_,
-              s.button_bits_);
-        field("Last report", "%d, %d  buttons %02X", s.reported_x_, s.reported_y_, s.reported_button_bits_);
+              s.buttons_);
+        static const char* const kTypes[] = {"none", "relative (M)", "maneuvering (J)", "absolute (T)", "absolute (S)"};
+        const unsigned type = unsigned(s.front_type_);
+        field("Front device", "%s%s  %s baud", type < 5 ? kTypes[type] : "power-on",
+              s.detect_ticks_ ? ", detecting" : "", s.sci_9600_ ? "9600" : "1200");
+        static const char* const kPc6[] = {"released", "high", "low"};
+        field("Back RTS (PC6)", "%s", kPc6[unsigned(s.pc6_)]);
         ImGui::EndTable();
     }
     if (ImGui::CollapsingHeader("Channels", ImGuiTreeNodeFlags_DefaultOpen) && begin_fields("slave_channels")) {

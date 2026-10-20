@@ -12,6 +12,19 @@ enum class VideoStandard : uint8_t { kNtsc = 0x01, kPal = 0x02 };
 
 namespace mamecdi {
 
+// $b6 (firmware 0x762), as 0xf3 reports it.
+enum class FrontDeviceType : uint8_t {
+    kNone = 0,
+    kRelative = 1, // 'M'
+    kManeuvering = 2, // 'J'
+    kAbsoluteCoordinate = 3, // 'T'
+    kAbsoluteScreen = 4, // 'S'
+    kPowerOn = 0x20, // 0x1c3
+};
+
+// Driven by 0xfc/0xfd (0x47b, 0x9bb); the back socket's RTS.
+enum class Pc6 : uint8_t { kReleased, kHigh, kLow };
+
 struct SlaveSaveState {
     static constexpr int kNumChannels = 4;
 
@@ -24,7 +37,6 @@ struct SlaveSaveState {
     };
 
     Channel channels_[kNumChannels];
-    bool irq2_ = false;
     // Frames to the servo's next tray step; when closed, until the disc type is known.
     int tray_timer_ = 0;
     // Open or opening: what the frontend sees as ejected.
@@ -56,17 +68,24 @@ struct SlaveSaveState {
     // Path order L->L, L->R, R->R, R->L.
     uint8_t dac_[4] = {0};
 
-    // 0x83/0x84 on channel 0, not MAME's old 0xf7 gate.
-    bool pointer_enabled_ = false;
-    int16_t pointer_x_ = 0;
-    int16_t pointer_y_ = 0;
-    uint8_t button_bits_ = 0x01; // latest host state, bit layout as sent
-    int slot_cycle_accum_ = 0;
-    int report_slots_left_ = 0; // >0: the reported_* sample is being "transmitted"
-    bool have_reported_ = false;
-    uint8_t reported_button_bits_ = 0;
-    int16_t reported_x_ = 0;
-    int16_t reported_y_ = 0;
+    // Front socket device (0x67a, 0xd90).
+    FrontDeviceType front_type_ = FrontDeviceType::kPowerOn; // $b6
+    bool flip_baud_ = false; // $55 b6
+    bool sci_9600_ = false; // BAUD 0x30, else 0x33
+    bool sci_receiving_ = false; // SCCR2 0x24
+    bool front_rts_negated_ = false; // PB4 high
+    uint8_t detect_ticks_ = 0; // $b9
+    uint8_t packet_count_ = 0; // $af
+    bool sync_lost_once_ = false; // $56 b2
+    uint8_t packet_buttons_ = 0; // $b0
+    uint16_t packet_x_ = 0; // $b1:$b2
+    uint16_t packet_y_ = 0; // $b3:$b4 (absolute devices)
+    bool pointer_enabled_ = false; // $63 b4, 0x83/0x84
+    int16_t pointer_x_ = 0; // $61:$62
+    int16_t pointer_y_ = 0; // $5f:$60
+    uint8_t buttons_ = 0; // $5e
+    Pc6 pc6_ = Pc6::kReleased;
+    uint8_t pc6_ticks_ = 0; // $ba
 };
 
 class SlaveHle : private SlaveSaveState {
@@ -81,7 +100,8 @@ public:
     // Steps the servo's tray. Once per frame.
     void tick_frame();
 
-    bool irq2_asserted() const { return irq2_; }
+    // Main loop 0x248.
+    bool irq2_asserted() const;
 
     // Channel 2's 0x8a (Reset main cpu): true once per request; the caller resets
     // the machine. Not saved: consumed within the CPU chunk that wrote it.
@@ -102,14 +122,14 @@ public:
     // Configuration, set once before boot, not saved.
     void set_video_standard(VideoStandard standard) { video_standard_ = standard; }
 
-    // Relative deltas; the position is clamped to device space 0-767/0-559.
-    // Reports go out from tick_cycles(), only after the BIOS sent 0x83.
-    void update_pointer(int dx, int dy, bool button1, bool button2 = false, bool button12 = false);
+    // Front socket: RTS on PB4, bytes into the SCI.
+    bool front_rts_negated() const { return front_rts_negated_; }
+    bool sci_at_9600_baud() const { return sci_9600_; }
+    void sci_receive(uint8_t byte, bool framing_error);
 
-    // Absolute device-space position (0-767/0-559), e.g. for a lightgun.
-    void set_pointer(int x, int y, bool button1, bool button2 = false, bool button12 = false);
+    bool back_rts_negated() const { return pc6_ != Pc6::kLow; }
 
-    // Paces pointer reports and the SLAVE timer. Call with each CPU chunk.
+    // Call with each CPU chunk.
     void tick_cycles(int cpu_cycles);
 
     // Applies the SLAVE's AD7528 attenuators to the frame's CDIC audio, in place.
@@ -162,12 +182,12 @@ private:
 
     bool reset_requested_ = false; // see consume_reset_request()
 
-    // CDi_MiSTer pointing_device.sv: 1200 baud, one byte per 1/120 s slot,
-    // one sample per 3 slots (25 ms).
-    static constexpr int kPointerSlotCycles = kCpuClockHz / 120;
-    void on_pointer_slot();
-    // Clamped to device space 0-767/0-559.
-    void set_pointer_position(int x, int y);
+    void output_compare_tick(); // 0x961, every 8.19 ms
+    void start_detection(); // 0x254
+    void device_lost(); // 0x756
+    void relative_byte(uint8_t v);
+    void absolute_byte(uint8_t v);
+    void publish_pointer(); // 0xe0d
     bool loaded(); // checks and rebuilds what a load can't carry
 };
 
