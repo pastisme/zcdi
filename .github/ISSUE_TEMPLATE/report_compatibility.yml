@@ -1,13 +1,13 @@
 name: Report Title Compatibility
 description: Report how a CD-i title runs in Zcdi.
-title: "[Compatibility]: <title>"
+title: "<Insert title>"
 labels: ["compatibility"]
 body:
   - type: markdown
     attributes:
       value: |
         Use this form to report a CD-i game's compatibility with Zcdi.
-        Replace `<title>` with the name of the game.
+        Replace `<Insert title>` with the name of the game.
 
         Please test the game yourself and report what you observe.
         For general emulator bugs, use the bug report template instead.

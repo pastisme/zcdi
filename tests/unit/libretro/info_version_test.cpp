@@ -2,6 +2,7 @@
 
 #include <fstream>
 #include <string>
+#include <string_view>
 
 #include "core/version.h"
 
@@ -18,5 +19,7 @@ TEST_CASE("the .info display_version matches the library version") {
         }
     }
 
-    CHECK(display_version == zcdi::version.sem_ver);
+    // Build metadata (+commit) is not part of the .info version.
+    const std::string_view sem_ver = zcdi::version.sem_ver;
+    CHECK(display_version == sem_ver.substr(0, sem_ver.find('+')));
 }

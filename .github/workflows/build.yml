@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - master
     tags:
       - 'v*'
   pull_request:
@@ -12,6 +11,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   tests:
@@ -29,6 +32,7 @@ jobs:
             -S . \
             -B build \
             -DCMAKE_BUILD_TYPE=Release \
+            -DVERSION_METADATA="$(git rev-parse --short HEAD)" \
             -DZCDI_BUILD_TESTS=ON
 
       - name: Build
@@ -69,6 +73,7 @@ jobs:
             -B build `
             -G "Visual Studio 17 2022" `
             -A x64 `
+            -DVERSION_METADATA="$(git rev-parse --short HEAD)" `
             -DZCDI_BUILD_TESTS=OFF `
             -DLIBRETRO_STATIC=OFF `
             -DLIBRETRO_SUFFIX=""
@@ -105,6 +110,7 @@ jobs:
             -B build `
             -G "Visual Studio 17 2022" `
             -A x64 `
+            -DVERSION_METADATA="$(git rev-parse --short HEAD)" `
             -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
 
       - name: Build
@@ -165,6 +171,7 @@ jobs:
             -B build \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
+            -DVERSION_METADATA="$(git rev-parse --short HEAD)" \
             -DCMAKE_TOOLCHAIN_FILE="${ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake" \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-24 \
@@ -217,6 +224,7 @@ jobs:
             -B build \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
+            -DVERSION_METADATA="$(git rev-parse --short HEAD)" \
             -DZCDI_BUILD_TESTS=OFF \
             -DLIBRETRO_STATIC=ON \
             -DLIBRETRO_SUFFIX=_emscripten
@@ -253,7 +261,9 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Create release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --generate-notes
+      - name: Create draft release
+        uses: softprops/action-gh-release@v3
+        with:
+          draft: true
+          generate_release_notes: true
+          files: dist/*
