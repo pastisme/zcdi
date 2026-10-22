@@ -7,6 +7,8 @@
 #include <vector>
 
 #include "core/machine.h"
+#include "disc/file_io.h"
+#include "disc/m3u_parser.h"
 #include "helpers.h"
 
 namespace zcdi {
@@ -18,22 +20,28 @@ const struct retro_vfs_interface* vfs_cb = nullptr;
 Machine* g_machine = nullptr;
 
 // An empty path is a slot the frontend added and hasn't filled yet.
+struct DiscImage {
+    std::string path;
+    std::string label; // from the m3u; empty = the file name
+};
 // g_disc_index == size() means the tray is empty.
-std::vector<std::string> g_disc_paths;
+std::vector<DiscImage> g_disc_paths;
 size_t g_disc_index = 0;
+size_t g_initial_index = 0;
+std::string g_initial_path;
 
 // Puts disc `index` in the tray, or empties it for an index with no image.
 bool insert_disc_image(size_t index) {
-    if (index >= g_disc_paths.size() || g_disc_paths[index].empty()) {
+    if (index >= g_disc_paths.size() || g_disc_paths[index].path.empty()) {
         g_machine->remove_disc();
         g_disc_index = index < g_disc_paths.size() ? index : g_disc_paths.size();
         return true;
     }
-    auto disc_ctx = std::make_unique<DiscContext>(g_disc_paths[index]);
+    auto disc_ctx = std::make_unique<DiscContext>(g_disc_paths[index].path);
     wire_vfs(*disc_ctx, vfs_cb);
     std::unique_ptr<Disc> disc = open_disc(std::move(disc_ctx));
     if (!g_machine->mount_disc(std::move(disc))) {
-        std::string text = "Couldn't open disc image " + g_disc_paths[index];
+        std::string text = "Couldn't open disc image " + g_disc_paths[index].path;
         show_error(env_cb, text.c_str());
         return false;
     }
@@ -70,7 +78,7 @@ bool RETRO_CALLCONV disk_replace_image_index(unsigned index, const struct retro_
         }
         return true;
     }
-    g_disc_paths[index] = info->path;
+    g_disc_paths[index] = {info->path, {}};
     return index != g_disc_index || insert_disc_image(index);
 }
 
@@ -84,17 +92,41 @@ bool RETRO_CALLCONV disk_add_image_index(void) {
 // Copies what `get` makes of image `index`'s path into the frontend's buffer.
 template <class F>
 bool copy_out(unsigned index, char* out, size_t len, F&& get) {
-    if (index >= g_disc_paths.size() || g_disc_paths[index].empty() || !out || len == 0) return false;
+    if (index >= g_disc_paths.size() || g_disc_paths[index].path.empty() || !out || len == 0) return false;
     std::snprintf(out, len, "%s", get(g_disc_paths[index]).c_str());
     return true;
 }
 
 bool RETRO_CALLCONV disk_get_image_path(unsigned index, char* path, size_t len) {
-    return copy_out(index, path, len, [](const std::string& p) { return p; });
+    return copy_out(index, path, len, [](const DiscImage& d) { return d.path; });
 }
 
 bool RETRO_CALLCONV disk_get_image_label(unsigned index, char* label, size_t len) {
-    return copy_out(index, label, len, [](const std::string& p) { return std::filesystem::path(p).stem().string(); });
+    return copy_out(index, label, len, [](const DiscImage& d) {
+        return d.label.empty() ? disc_generic_path(d.path).stem().string() : d.label;
+    });
+}
+
+bool RETRO_CALLCONV disk_set_initial_image(unsigned index, const char* path) {
+    if (!path || !*path) return false;
+    g_initial_index = index;
+    g_initial_path = path;
+    return true;
+}
+
+bool load_playlist(const std::string& m3u_path) {
+    DiscContext ctx(m3u_path);
+    wire_vfs(ctx, vfs_cb);
+    std::string text;
+    std::vector<M3uEntry> entries;
+    if (!disc_read_whole_file(m3u_path, text, ctx) || !parse_m3u(text, entries)) {
+        std::string msg = "Couldn't read disc playlist " + m3u_path;
+        show_error(env_cb, msg.c_str());
+        return false;
+    }
+    for (const M3uEntry& e : entries)
+        g_disc_paths.push_back({m3u_entry_path(m3u_path, e.path), e.label});
+    return true;
 }
 
 } // namespace
@@ -106,8 +138,8 @@ void register_disk_control(retro_environment_t env, const struct retro_vfs_inter
     if (env(RETRO_ENVIRONMENT_GET_DISK_CONTROL_INTERFACE_VERSION, &version) && version >= 1) {
         struct retro_disk_control_ext_callback ext = {
             disk_set_eject_state, disk_get_eject_state,     disk_get_image_index, disk_set_image_index,
-            disk_get_num_images,  disk_replace_image_index, disk_add_image_index, nullptr,
-            disk_get_image_path,  disk_get_image_label, // no set_initial_image
+            disk_get_num_images,  disk_replace_image_index, disk_add_image_index, disk_set_initial_image,
+            disk_get_image_path,  disk_get_image_label,
         };
         env(RETRO_ENVIRONMENT_SET_DISK_CONTROL_EXT_INTERFACE, &ext);
     } else {
@@ -126,8 +158,20 @@ void disk_control_reset(Machine* machine) {
 }
 
 bool disk_control_insert_content(const char* path) {
-    g_disc_paths.push_back(path);
-    return insert_disc_image(0);
+    const std::string ext = disc_path_ext(path);
+    if (ext == "m3u") {
+        if (!load_playlist(path)) return false;
+    } else {
+        g_disc_paths.push_back({path, {}});
+    }
+    // Only if the playlist still has that disc where it was.
+    size_t first = 0;
+    if (g_initial_index < g_disc_paths.size() && g_disc_paths[g_initial_index].path == g_initial_path) {
+        first = g_initial_index;
+    }
+    g_initial_index = 0;
+    g_initial_path.clear();
+    return insert_disc_image(first);
 }
 
 } // namespace zcdi

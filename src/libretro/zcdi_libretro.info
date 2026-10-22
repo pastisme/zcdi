@@ -1,7 +1,7 @@
 # Software Information
 display_name = "Philips - CD-i (zcdi)"
 authors = "pastisme"
-supported_extensions = "chd|cue|bin|iso"
+supported_extensions = "chd|cue|bin|iso|m3u"
 corename = "zcdi"
 license = "GPLv3"
 permissions = ""
@@ -47,4 +47,4 @@ firmware2_opt = "true"
 
 notes = "(!) The BIOS for the selected Video Standard core option is required: cdi200.rom for NTSC (default), cdi220b.rom for PAL.|(!) cdi200.rom (md5): 2969341396aa61e0143dc2351aaa6ef6|(!) cdi220b.rom (md5): ac0d468be366779c9df633be98da250a|(!) vmpega.rom (md5): 53ba3bf7443187a657baa272d01d3771|Without vmpega.rom the player has no Digital Video Cartridge."
 
-description = "zcdi emulates the Philips CD-i Mono-I player (SCC68070 CPU, MCD212 video, CDIC disc and audio controller) and the optional Digital Video Cartridge for MPEG-1 video titles. It runs the original BIOS and cartridge firmware, and reads CHD and CUE/BIN disc images."
+description = "zcdi emulates the Philips CD-i Mono-I player (SCC68070 CPU, MCD212 video, CDIC disc and audio controller) and the optional Digital Video Cartridge for MPEG-1 video titles. It runs the original BIOS and cartridge firmware, and reads CHD and CUE/BIN disc images, and M3U playlists for multi-disc titles."

@@ -40,6 +40,7 @@ set(ZCDI_SOURCES
     src/disc/disc.cpp
     src/disc/file_io.cpp
     src/disc/cue_parser.cpp
+    src/disc/m3u_parser.cpp
     src/disc/raw2352_disc.cpp
     src/disc/chd_disc.cpp
     mamecdi/mcd212/mcd212.cpp

@@ -116,7 +116,7 @@ RETRO_API void retro_get_system_info(struct retro_system_info* info) {
     std::memset(info, 0, sizeof(*info));
     info->library_name = "zcdi";
     info->library_version = zcdi::version.sem_ver.c_str();
-    info->valid_extensions = "chd|cue|bin|iso";
+    info->valid_extensions = "chd|cue|bin|iso|m3u";
     info->need_fullpath = true; // disc backends open by path
     info->block_extract = true;
 }
