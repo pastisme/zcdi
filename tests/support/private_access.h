@@ -25,15 +25,17 @@ struct ZcdiPrivateMemberSteal {
 
 // At file scope: ZCDI_PRIVATE_MEMBER(Tag, Class, member, Type), then
 // priv<Tag>(obj) is the field, or priv<Tag>(obj, args...) calls the method.
-// Explicit instantiations skip access checks ([temp.spec]/6).
+// Explicit instantiations skip access checks ([temp.spec]/6). They must sit in
+// the template's own (anonymous) namespace: clang rejects them outside it.
 #define ZCDI_PRIVATE_MEMBER(Tag, Class, Member, ...)                                        \
     namespace {                                                                             \
     struct Tag {                                                                            \
         using type = ::zcdi_test::private_access_detail::member_ptr<__VA_ARGS__, Class>;    \
         friend type zcdi_private_member(Tag);                                               \
     };                                                                                      \
+    template struct ZcdiPrivateMemberSteal<Tag, &Class::Member>;                            \
     }                                                                                       \
-    template struct ZcdiPrivateMemberSteal<Tag, &Class::Member>
+    static_assert(true)
 
 namespace zcdi_test {
 
