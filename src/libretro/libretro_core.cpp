@@ -144,6 +144,7 @@ RETRO_API void retro_init(void) {
 
 RETRO_API void retro_deinit(void) {
     zcdi::disk_control_reset(nullptr);
+    if (g_machine) zcdi::clear_memory_maps(env_cb);
     g_machine.reset();
     g_audio.reset();
 }
@@ -218,6 +219,7 @@ RETRO_API void retro_unload_game(void) {
         }
     }
     zcdi::disk_control_reset(nullptr);
+    if (g_machine) zcdi::clear_memory_maps(env_cb);
     g_machine.reset();
 }
 

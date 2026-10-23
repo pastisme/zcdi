@@ -133,6 +133,11 @@ void set_memory_maps(retro_environment_t env, const Machine& machine) {
     if (env) env(RETRO_ENVIRONMENT_SET_MEMORY_MAPS, &map);
 }
 
+void clear_memory_maps(retro_environment_t env) {
+    static retro_memory_map empty{};
+    if (env) env(RETRO_ENVIRONMENT_SET_MEMORY_MAPS, &empty);
+}
+
 void reset_frontend_state(Mixer& audio, int sample_rate) {
     audio = Mixer(sample_rate);
     input_history() = InputHistory{};

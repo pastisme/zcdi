@@ -44,6 +44,7 @@ bool negotiate_variable_state_size(retro_environment_t env);
 
 // Call again whenever the machine is rebuilt: the descriptors point into it.
 void set_memory_maps(retro_environment_t env, const Machine& machine);
+void clear_memory_maps(retro_environment_t env);
 
 // Call on cold boot or reset, so old queued audio doesn't play into it.
 void reset_frontend_state(Mixer& audio, int sample_rate);
