@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <climits>
 #include <cstring>
-#include <filesystem>
 #include <memory>
 #include <vector>
 
@@ -14,8 +13,6 @@
 namespace zcdi {
 
 namespace {
-namespace fs = std::filesystem;
-
 // Same byteswap/descramble attempts as read_sector, without the latch.
 // Leaves the file position wherever it ended.
 bool sector_at_offset_looks_like_lba0(DiscFile& bin, uint64_t byte_offset) {
@@ -72,11 +69,10 @@ public:
             if (!is_raw_2352_mode(t.mode)) return false;
         }
 
-        const fs::path dir = disc_generic_path(path).parent_path();
         std::vector<int> file_frames;
         for (const CueFile& f : sheet.files) {
             files_.push_back(std::make_unique<DiscFile>());
-            std::string bin_path = have_cue ? (dir / fs::path(f.name)).lexically_normal().string() : path;
+            std::string bin_path = have_cue ? disc_path_beside(path, f.name) : path;
             if (!disc_file_open_read(bin_path, *files_.back(), ctx)) return false;
             uint64_t size = disc_file_size(files_.back().get());
             if (size == static_cast<uint64_t>(-1) || size == 0 || size % kRawSectorSize != 0) return false;

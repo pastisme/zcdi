@@ -106,6 +106,46 @@ TEST_CASE("one .bin per track: the files are laid end to end") {
     CHECK(mark_at(*disc, 16) == -1);
 }
 
+TEST_CASE("a FILE path is relative to the cue unless absolute") {
+    std::map<std::string, std::vector<uint8_t>> files;
+    std::string name;
+    std::string bin;
+    SUBCASE("same directory") {
+        name = "game.bin";
+        bin = "d/game.bin";
+    }
+    SUBCASE("subdirectory") {
+        name = "tracks/game.bin";
+        bin = "d/tracks/game.bin";
+    }
+    SUBCASE("subdirectory, Windows separators") {
+        name = "tracks\\game.bin";
+        bin = "d/tracks/game.bin";
+    }
+    SUBCASE("absolute") {
+        name = "/elsewhere/game.bin";
+        bin = "/elsewhere/game.bin";
+    }
+    const std::string cue = "FILE \"" + name + "\" BINARY\n  TRACK 01 MODE2/2352\n    INDEX 01 00:00:00\n";
+    files["d/game.cue"].assign(cue.begin(), cue.end());
+    files[bin] = marked_frames(3, 0);
+
+    std::unique_ptr<Disc> disc = open_raw2352_disc(memory_context("d/game.cue", files));
+    REQUIRE(disc);
+    CHECK(mark_at(*disc, 2) == 2);
+}
+
+TEST_CASE("a cue whose FILE path doesn't exist is rejected even with the bin next to it") {
+    std::map<std::string, std::vector<uint8_t>> files;
+    std::string name;
+    SUBCASE("missing subdirectory") { name = "tracks/game.bin"; }
+    SUBCASE("stale absolute Windows path") { name = "C:\\cdi\\games\\game.bin"; }
+    const std::string cue = "FILE \"" + name + "\" BINARY\n  TRACK 01 MODE2/2352\n    INDEX 01 00:00:00\n";
+    files["d/game.cue"].assign(cue.begin(), cue.end());
+    files["d/game.bin"] = marked_frames(3, 0);
+    CHECK_FALSE(open_raw2352_disc(memory_context("d/game.cue", files)));
+}
+
 TEST_CASE("single .bin: track 1's INDEX 01 is LBA 0, later tracks by INDEX 01") {
     std::map<std::string, std::vector<uint8_t>> files;
     const std::string cue =

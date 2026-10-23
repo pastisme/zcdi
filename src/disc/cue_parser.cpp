@@ -11,11 +11,6 @@ std::string unquote(const std::string& s) {
     if (a != std::string::npos && b != std::string::npos && b > a) return s.substr(a + 1, b - a - 1);
     return s;
 }
-// Either separator: Windows-made cues often embed a full "C:\..." path.
-std::string basename_of(const std::string& s) {
-    auto slash = s.find_last_of("/\\");
-    return slash == std::string::npos ? s : s.substr(slash + 1);
-}
 // Ends an unquoted FILE name.
 bool is_file_type(const std::string& tok) {
     return tok == "BINARY" || tok == "WAVE" || tok == "MP3" || tok == "AIFF" || tok == "MOTOROLA";
@@ -24,7 +19,7 @@ CueFile parse_file(const std::string& rest) {
     CueFile file;
     std::string after_name;
     if (rest.find('"') != std::string::npos) {
-        file.name = basename_of(unquote(rest));
+        file.name = unquote(rest);
         after_name = rest.substr(rest.find_last_of('"') + 1);
     } else {
         std::istringstream ls(rest);
@@ -37,7 +32,6 @@ CueFile parse_file(const std::string& rest) {
             if (!file.name.empty()) file.name += " ";
             file.name += tok;
         }
-        file.name = basename_of(file.name);
     }
     std::istringstream ls(after_name);
     ls >> file.type;

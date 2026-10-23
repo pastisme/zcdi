@@ -30,6 +30,8 @@ bool disc_read_whole_file(const std::string& path, std::string& out, const DiscC
 
 // `path` with '\\' read as '/', as cue sheets from Windows use it.
 std::filesystem::path disc_generic_path(std::string path);
+// `entry` from a cue or m3u, against the folder of `list_path` unless absolute.
+std::string disc_path_beside(const std::string& list_path, const std::string& entry);
 // Lower-case extension without the dot, e.g. "cue"; empty if none.
 std::string disc_path_ext(const std::string& path);
 

@@ -5,7 +5,7 @@
 namespace zcdi {
 
 struct CueFile {
-    std::string name; // FILE "<name>" ...
+    std::string name; // FILE "<name>" ..., as written: may hold a path
     std::string type; // BINARY, MOTOROLA, WAVE, ...
 };
 

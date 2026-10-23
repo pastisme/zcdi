@@ -41,21 +41,4 @@ TEST_CASE("m3u without entries fails") {
     CHECK_FALSE(parse_m3u("#EXTM3U\n\n", entries));
 }
 
-TEST_CASE("m3u entry paths") {
-    SUBCASE("relative to the playlist's folder") {
-        CHECK(m3u_entry_path("/roms/cdi/Game.m3u", "Game (Disc 1).chd") == "/roms/cdi/Game (Disc 1).chd");
-        CHECK(m3u_entry_path("/roms/cdi/Game.m3u", "discs/../Game.cue") == "/roms/cdi/Game.cue");
-    }
-    SUBCASE("Windows separators in the entry") {
-        CHECK(m3u_entry_path("/roms/cdi/Game.m3u", "discs\\d1.chd") == "/roms/cdi/discs/d1.chd");
-    }
-    SUBCASE("absolute entries kept") {
-        CHECK(m3u_entry_path("/roms/cdi/Game.m3u", "/other/d1.chd") == "/other/d1.chd");
-        CHECK(m3u_entry_path("/roms/cdi/Game.m3u", "C:\\cdi\\d1.chd") == "C:\\cdi\\d1.chd");
-    }
-    SUBCASE("playlist without folder") {
-        CHECK(m3u_entry_path("Game.m3u", "d1.chd") == "d1.chd");
-    }
-}
-
 }  // TEST_SUITE

@@ -50,9 +50,11 @@ TEST_CASE("FILE name forms") {
         REQUIRE(parse_cue("FILE \"Rise of the Robots (Europe).bin\" BINARY\nTRACK 01 MODE2/2352\n", sheet));
         CHECK(sheet.files[0].name == "Rise of the Robots (Europe).bin");
     }
-    SUBCASE("quoted Windows path keeps only the file name") {
+    SUBCASE("quoted paths are kept as written") {
         REQUIRE(parse_cue("FILE \"C:\\cdi\\games\\game.bin\" BINARY\nTRACK 01 MODE2/2352\n", sheet));
-        CHECK(sheet.files[0].name == "game.bin");
+        CHECK(sheet.files[0].name == "C:\\cdi\\games\\game.bin");
+        REQUIRE(parse_cue("FILE \"tracks/game.bin\" BINARY\nTRACK 01 MODE2/2352\n", sheet));
+        CHECK(sheet.files[0].name == "tracks/game.bin");
     }
     SUBCASE("unquoted, with spaces") {
         REQUIRE(parse_cue("FILE my game.bin BINARY\nTRACK 01 MODE2/2352\n", sheet));

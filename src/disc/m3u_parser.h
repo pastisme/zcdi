@@ -12,7 +12,4 @@ struct M3uEntry {
 // Parses m3u text, not a path: one image per line, '#' lines skipped.
 bool parse_m3u(const std::string& text, std::vector<M3uEntry>& out);
 
-// `entry` resolved against the folder of `m3u_path`, unless absolute.
-std::string m3u_entry_path(const std::string& m3u_path, const std::string& entry);
-
 } // namespace zcdi

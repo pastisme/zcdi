@@ -125,7 +125,7 @@ bool load_playlist(const std::string& m3u_path) {
         return false;
     }
     for (const M3uEntry& e : entries)
-        g_disc_paths.push_back({m3u_entry_path(m3u_path, e.path), e.label});
+        g_disc_paths.push_back({disc_path_beside(m3u_path, e.path), e.label});
     return true;
 }
 

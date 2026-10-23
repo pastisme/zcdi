@@ -65,6 +65,20 @@ std::filesystem::path disc_generic_path(std::string path) {
     return std::filesystem::path(path);
 }
 
+namespace {
+// "C:\..." or "\\server\..." also counts, whatever the host OS.
+bool is_absolute(const std::string& p) {
+    if (p.empty()) return false;
+    if (p[0] == '/' || p[0] == '\\') return true;
+    return p.size() >= 2 && p[1] == ':';
+}
+} // namespace
+
+std::string disc_path_beside(const std::string& list_path, const std::string& entry) {
+    if (is_absolute(entry)) return entry;
+    return (disc_generic_path(list_path).parent_path() / disc_generic_path(entry)).lexically_normal().string();
+}
+
 std::string disc_path_ext(const std::string& path) {
     std::string e = disc_generic_path(path).extension().string();
     if (!e.empty() && e[0] == '.') e.erase(0, 1);
