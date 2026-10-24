@@ -6,7 +6,7 @@
 
 #include "core/version.h"
 
-TEST_CASE("the .info display_version matches the library version") {
+TEST_CASE("the .info display_version, if set, matches the library version") {
     std::ifstream info(ZCDI_LIBRETRO_INFO_PATH);
     REQUIRE(info);
 
@@ -18,6 +18,9 @@ TEST_CASE("the .info display_version matches the library version") {
             break;
         }
     }
+
+    // Optional: RetroArch shows library_version for a loaded core.
+    if (display_version.empty()) return;
 
     // Build metadata (+commit) is not part of the .info version.
     const std::string_view sem_ver = zcdi::version.sem_ver;
