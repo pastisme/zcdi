@@ -3,9 +3,8 @@ display_name = "Philips - CD-i (zcdi)"
 authors = "pastisme"
 supported_extensions = "chd|cue|bin|iso|m3u"
 corename = "zcdi"
-license = "GPLv3"
+license = "GPLv3+"
 permissions = ""
-display_version = "0.1.0"
 categories = "Emulator"
 
 # Hardware Information
