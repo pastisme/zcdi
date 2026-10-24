@@ -881,6 +881,9 @@ void Mcd212::composite_row(const uint32_t* row_a, const uint32_t* row_b, int wid
     // Reuse the last result when a pixel's inputs match its neighbour's.
     const uint8_t* weight_a = weight_factor_line_[0];
     const uint8_t* weight_b = weight_factor_line_[1];
+    // The frame player shows on every vsd pixel, black outside its window
+    // (cditop.sv, frameplayer.sv); studio black, not the RTL's 0.
+    const bool fmv_backdrop = dvc_attached_ && icm_ev_;
     uint32_t color = 0;
     for (int i = 0; i < width; ++i) {
         const int x = i * step;
@@ -890,10 +893,11 @@ void Mcd212::composite_row(const uint32_t* row_a, const uint32_t* row_b, int wid
             color = composite_pixel(a, a != kNoPixel, b, b != kNoPixel, weight_a[x], weight_b[x]);
         }
         const uint8_t backdrop = a == kNoPixel && b == kNoPixel;
-        row[x] = color;
+        const uint32_t out = (backdrop && fmv_backdrop) ? kStudioBlack : color;
+        row[x] = out;
         mask[x] = backdrop;
         if (step == 2) {
-            row[x + 1] = color;
+            row[x + 1] = out;
             mask[x + 1] = backdrop;
         }
     }
@@ -1036,16 +1040,12 @@ void Mcd212::draw_cursor() {
             if (x < 0 || x >= kFbWidth) continue;
             if (pattern & (1u << (15 - (i / px_per_bit)))) line[x] = color;
         }
+        output_row(y);
     }
 }
 
 void Mcd212::overlay_dvc_frame() {
     if (!dvc_attached_) return;
-    // The frame player shows on every vsd pixel, black outside its window
-    // (cditop.sv, frameplayer.sv); studio black, not the RTL's 0.
-    for (std::size_t i = 0; i < fb_.size(); ++i) {
-        if (backdrop_mask_[i]) fb_[i] = kStudioBlack;
-    }
     if (!dvc_frame_ || dvc_frame_width_ <= 0 || dvc_frame_height_ <= 0) return;
     if (dvc_decwin_w_ == 0 || dvc_decwin_h_ == 0 || !dvc_fmv_show_) return;
 
@@ -1053,18 +1053,34 @@ void Mcd212::overlay_dvc_frame() {
     const int height = std::min({int(dvc_decwin_h_), kFbHeight - dvc_scrpos_y_, dvc_frame_height_ - dvc_decoff_y_});
     const int width = std::min(int(dvc_decwin_w_), dvc_frame_width_ - dvc_decoff_x_);
     // VCD clock: a decoded pixel per 512/231 columns, else two (vmpeg.sv).
-    const int columns = dvc_vcd_pixel_clock_ ? std::min((width * 512 + 230) / 231, 2 * (kLineWidth - dvc_scrpos_x_))
-                                             : 2 * std::min(width, kLineWidth - dvc_scrpos_x_);
+    const bool vcd = dvc_vcd_pixel_clock_;
+    const int columns = vcd ? std::min((width * 512 + 230) / 231, 2 * (kLineWidth - dvc_scrpos_x_))
+                            : 2 * std::min(width, kLineWidth - dvc_scrpos_x_);
     for (int y = 0; y < height; ++y) {
         const std::size_t row = std::size_t(dvc_scrpos_y_ + y) * kFbWidth + 2 * std::size_t(dvc_scrpos_x_);
         const std::size_t src_y = std::size_t(dvc_decoff_y_) + y;
         const uint8_t* src = dvc_frame_ + (src_y * dvc_frame_width_ + dvc_decoff_x_) * 4;
-        for (int c = 0; c < columns; ++c) {
-            if (!backdrop_mask_[row + c]) continue;
-            const uint8_t* p = src + (dvc_vcd_pixel_clock_ ? std::size_t(c * 231 / 512) : std::size_t(c / 2)) * 4;
-            fb_[row + c] = (uint32_t(p[0]) << 16) | (uint32_t(p[1]) << 8) | uint32_t(p[2]);
+        // Locals: stores through `out` would otherwise reload members per pixel.
+        uint32_t* out = fb_.data() + row;
+        const uint8_t* vsd = backdrop_mask_.data() + row;
+        auto pixel = [src](std::size_t i) {
+            const uint8_t* p = src + i * 4;
+            return (uint32_t(p[0]) << 16) | (uint32_t(p[1]) << 8) | uint32_t(p[2]);
+        };
+        if (vcd) {
+            for (int c = 0; c < columns; ++c) {
+                if (vsd[c]) out[c] = pixel(std::size_t(c * 231 / 512));
+            }
+            continue;
+        }
+        for (int c = 0; c < columns; c += 2) {
+            const uint32_t color = pixel(std::size_t(c / 2));
+            if (vsd[c]) out[c] = color;
+            if (vsd[c + 1]) out[c + 1] = color;
         }
     }
+    for (int y = 0; y < height; ++y)
+        output_row(dvc_scrpos_y_ + y);
 }
 
 int Mcd212::begin_field(int lines) {
@@ -1119,12 +1135,13 @@ void Mcd212::end_field() {
     const std::size_t from = static_cast<std::size_t>(active_height_) * kFbWidth;
     std::fill(fb_.begin() + std::ptrdiff_t(from), fb_.end(), 0u);
     std::fill(backdrop_mask_.begin() + std::ptrdiff_t(from), backdrop_mask_.end(), uint8_t{0});
+    for (int y = active_height_; y < kFbHeight; ++y)
+        output_row(y);
     update_cursor_blink();
+    // Active rows went out line by line; these output the rows they change.
     // The cursor stays on top of FMV (mcd212.sv clears vsd under it).
     overlay_dvc_frame();
     draw_cursor();
-    for (int y = 0; y < kFbHeight; ++y)
-        output_row(y);
     woven_last_ = weaving_;
     // video_timing.sv: an odd field is followed by an even one only with SM;
     // PA (fake_parity) toggles, and is 1 after every even field.
