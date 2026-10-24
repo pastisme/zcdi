@@ -3,9 +3,12 @@
 #include <cstdint>
 #include <algorithm>
 #include <cstdlib>
+#include <memory>
 #include <utility>
 
 #include "libretro/input_mapping.h"
+#include "support/fake_machine.h"
+#include "support/state_roundtrip.h"
 
 using zcdi::analog_stick_delta;
 
@@ -72,6 +75,25 @@ TEST_CASE("joypad buttons read the same with and without frontend bitmasks") {
         CHECK(zcdi::joypad_buttons(fake_input_state, 0) == 0);
     }
     zcdi::query_input_bitmasks(nullptr);
+}
+
+TEST_CASE("the ports' devices are plugged before the first frame, so a state loaded then restores them") {
+    zcdi::set_port_device(0, RETRO_DEVICE_JOYPAD);
+    zcdi::set_port_device(1, RETRO_DEVICE_NONE);
+    std::vector<uint8_t> state;
+    {
+        std::unique_ptr<zcdi::Machine> m = zcdi_test::build_fake_machine();
+        zcdi::plug_port_devices(*m);
+        CHECK(m->bus().plugged(zcdi::Bus::Socket::kFront) == zcdi::DeviceId::kManeuvering);
+        CHECK(!m->bus().plugged(zcdi::Bus::Socket::kBack));
+        for (int i = 0; i < 20; ++i) m->run_frame();  // past the pad's power-on delay
+        state = zcdi_test::save_machine(*m);
+    }
+    // A new session loading the state before its first frame.
+    std::unique_ptr<zcdi::Machine> m = zcdi_test::build_fake_machine();
+    zcdi::plug_port_devices(*m);
+    REQUIRE(zcdi_test::load_machine(*m, state));
+    CHECK(zcdi_test::first_difference(zcdi_test::save_machine(*m), state) == -1);
 }
 
 }  // TEST_SUITE

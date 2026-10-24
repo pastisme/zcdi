@@ -106,4 +106,16 @@ TEST_CASE("a restored device sends the same bytes") {
     CHECK(run(b, 8) == run(a, 8));
 }
 
+TEST_CASE("a device idle after a packet restores") {
+    PointingDevice a(DeviceId::kManeuvering);
+    identify(a);
+    REQUIRE(run(a, 2).empty());  // nothing new: no packet, the last one's position stays
+    const std::vector<uint8_t> state = zcdi_test::save_state(a);
+    PointingDevice b(DeviceId::kManeuvering);
+    REQUIRE(zcdi_test::load_state(b, state));
+    a.set_input({.left = true});
+    b.set_input({.left = true});
+    CHECK(run(b, 6) == run(a, 6));
+}
+
 }  // TEST_SUITE

@@ -5,10 +5,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <vector>
 
 #include "core/machine.h"
-#include "core/machine_inspector.h"
+#include "mk48t08/mk48t08.h"
 #include "support/fake_disc.h"
 #include "support/fake_machine.h"
 #include "support/state_roundtrip.h"
@@ -89,20 +90,25 @@ TEST_CASE("a bad machine state is rejected and changes nothing") {
     CHECK(zcdi_test::first_difference(save_machine(*m), current) == -1);
 }
 
-TEST_CASE("a matching state damaged past its identity checks cold-boots the machine") {
-    std::unique_ptr<zcdi::Machine> m = build_fake_machine();
+TEST_CASE("a matching state damaged past its identity checks changes nothing, NVRAM included") {
+    std::vector<std::byte> nvram(zcdi::mamecdi::Mk48t08::kSize);
+    for (size_t i = 0; i < 0x1ff0; ++i) nvram[i] = std::byte(i * 7);  // below the clock registers
+    std::unique_ptr<zcdi::Machine> m = build_fake_machine_with({.nvram = nvram});
     for (int i = 0; i < 3; ++i) m->run_frame();
     std::vector<uint8_t> bad = save_machine(*m);
-    // Break the MCD212 section tag, deep inside the BUS section.
+    // Break the MCD212 section tag, deep inside the BUS section and before NVRAM.
     const uint8_t tag[4] = {'M', 'C', 'D', ' '};
     size_t at = 0;
     while (at + 4 <= bad.size() && !std::equal(tag, tag + 4, bad.begin() + std::ptrdiff_t(at))) ++at;
     REQUIRE(at + 4 <= bad.size());
     bad[at] ^= 0x20;
     m->run_frame();
+    const std::vector<uint8_t> current = save_machine(*m);
 
     CHECK(!load_machine(*m, bad));
-    CHECK(zcdi::MachineInspector(*m).frame() == 0);
+    CHECK(zcdi_test::first_difference(save_machine(*m), current) == -1);
+    const std::span<const std::byte> kept = m->bus().nvram_data();
+    CHECK(std::equal(kept.begin(), kept.begin() + 0x1ff0, nvram.begin()));
     m->run_frame();  // still runs
 }
 

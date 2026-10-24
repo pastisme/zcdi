@@ -162,12 +162,26 @@ bool Machine::state_matches(StateReader r) {
 }
 
 bool Machine::load_state(StateReader& r) {
-    // Checked first so a mismatched state changes nothing. Loading then
-    // writes as it goes; only damaged data can fail past this point.
     if (!state_matches(r)) return false;
+    // Loading writes as it goes, so a damaged state is undone from a snapshot.
+    // The buffers keep their capacity across loads.
+    undo_state_.clear();
+    StateWriter snapshot(undo_state_);
+    save_state(snapshot);
+    undo_nvram_.clear();
+    StateWriter nvram(undo_nvram_);
+    bus_.nvram_state_io(nvram);
+
     state_io(r);
     if (!r.failed()) return true;
-    restore_power_on(/*keep_ram=*/false); // a cold boot
+    StateReader undo(undo_state_);
+    state_io(undo);
+    if (!undo.failed()) return false;
+    // A field list reads back differently than it writes: cold boot, saves kept.
+    std::fprintf(stderr, "[zcdi] internal error: state before the load didn't reload\n");
+    restore_power_on(/*keep_ram=*/false);
+    StateReader keep(undo_nvram_);
+    bus_.nvram_state_io(keep);
     return false;
 }
 

@@ -63,8 +63,8 @@ public:
     void set_rtc_boot_time(std::time_t t) { bus_.set_rtc_boot_time(t); }
 
     // Only between run_frame() calls. A state must match this machine's
-    // BIOS, DVC ROM, options and mounted disc; a mismatched one leaves the
-    // machine as it was. A matching but damaged one cold-boots it.
+    // BIOS, DVC ROM, options and mounted disc. A load that fails, mismatched
+    // or damaged, leaves the machine as it was.
     void save_state(StateWriter& w);
     bool load_state(StateReader& r);
     size_t state_size();
@@ -101,6 +101,9 @@ private:
     // Saved by the constructor with the save-state field lists, so a reset
     // covers exactly what a save state does.
     std::vector<uint8_t> power_on_state_;
+    // load_state()'s snapshot of the machine and of NVRAM alone.
+    std::vector<uint8_t> undo_state_;
+    std::vector<uint8_t> undo_nvram_;
 };
 
 } // namespace zcdi

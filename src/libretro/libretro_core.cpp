@@ -149,7 +149,10 @@ RETRO_API void retro_deinit(void) {
     g_audio.reset();
 }
 
-RETRO_API void retro_set_controller_port_device(unsigned port, unsigned device) { zcdi::set_port_device(port, device); }
+RETRO_API void retro_set_controller_port_device(unsigned port, unsigned device) {
+    zcdi::set_port_device(port, device);
+    if (g_machine) zcdi::plug_port_devices(*g_machine);
+}
 
 RETRO_API bool retro_load_game(const struct retro_game_info* game) {
     enum retro_pixel_format fmt = RETRO_PIXEL_FORMAT_XRGB8888;
@@ -196,6 +199,7 @@ RETRO_API bool retro_load_game(const struct retro_game_info* game) {
     zcdi::set_memory_maps(env_cb, *g_machine);
 
     g_machine->cold_boot();
+    zcdi::plug_port_devices(*g_machine);
     zcdi::reset_frontend_state(*g_audio, kSampleRate);
     zcdi::disk_control_reset(g_machine.get());
     if (game && game->path && !zcdi::disk_control_insert_content(game->path)) return false;

@@ -204,6 +204,11 @@ void set_port_device(unsigned port, unsigned device) {
     g_history.gun_y = -1;
 }
 
+void plug_port_devices(Machine& machine) {
+    machine.bus().plug(Bus::Socket::kFront, device_for_port(0, g_port0_device));
+    machine.bus().plug(Bus::Socket::kBack, device_for_port(1, g_port1_device));
+}
+
 void set_input_descriptors(retro_environment_t env) {
     static const struct retro_input_descriptor desc[] = {
         {0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT, "D-Pad Left"},

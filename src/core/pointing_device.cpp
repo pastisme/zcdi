@@ -23,7 +23,9 @@ void PointingDevice::state_io(T& archive) {
     archive.io_struct(static_cast<PointingDeviceSaveState&>(*this));
     archive.end_section();
     if constexpr (T::kLoading) {
-        archive.check(state_ <= kSending && packet_len_ <= sizeof(packet_) && packet_pos_ <= packet_len_);
+        // packet_pos_ is stale once a packet is out; it's only read while sending.
+        archive.check(state_ <= kSending && packet_len_ <= sizeof(packet_) &&
+                      (state_ != kSending || packet_pos_ < packet_len_));
         archive.check(accel_ >= 0 && accel_ <= 7);
     }
 }

@@ -21,6 +21,9 @@ uint16_t joypad_buttons(retro_input_state_t input_state_cb, unsigned port);
 // From retro_set_controller_port_device(): port 0 front socket, port 1 back.
 void set_port_device(unsigned port, unsigned device);
 
+// Plugs the ports' devices now, so a state loaded before the first frame finds them.
+void plug_port_devices(Machine& machine);
+
 // Left-stick reading to a per-report pointer step.
 void analog_stick_delta(int16_t raw_x, int16_t raw_y, int& out_dx, int& out_dy);
 
