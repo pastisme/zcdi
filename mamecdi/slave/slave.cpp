@@ -9,6 +9,8 @@
 namespace zcdi {
 namespace mamecdi {
 
+using namespace slave;
+
 namespace {
 constexpr uint32_t kSlaveBase = 0x310000;
 
@@ -25,7 +27,17 @@ constexpr uint8_t kFadeGain[kFadeTicks] = {
     51,  45,  39,  33,  28,  23,  19,  15,  12,  9,   6,   4,   2,   1,   0,   0,
 };
 constexpr uint8_t kMaxMasterDb = 0x2d;
+constexpr unsigned kDimDb = 20;
+constexpr uint8_t kForcedMuteDb = 0x3f; // beyond kDacCodeForDb: code 0
 
+constexpr uint8_t kIdleByte = 0xff; // read from a channel with nothing queued
+
+constexpr uint8_t kSlaveRevision = 0x20; // 2.0, in the kSysVersion reply
+constexpr uint8_t kServoRevision = 0x20; // 2.x, in the kServoVersion reply
+
+// Pointer position clamps (main loop 0xd90).
+constexpr int kPointerMaxX = 0x2ff;
+constexpr int kPointerMaxY = 0x22f;
 } // namespace
 
 SlaveHle::SlaveHle() {
@@ -62,10 +74,10 @@ uint8_t SlaveHle::read_byte(uint32_t addr) {
     uint32_t off = addr - kSlaveBase;
     if ((off & 1) == 0) return 0; // high byte of the word: nothing meaningful here
     int channel = static_cast<int>(off >> 1);
-    if (channel >= kNumChannels) return 0xff;
+    if (channel >= kNumChannels) return kIdleByte;
 
     Channel& c = channels_[channel];
-    if (c.out_pos >= c.out_len) return 0xff; // idle -- matches MAME's uncommitted-read default
+    if (c.out_pos >= c.out_len) return kIdleByte; // matches MAME's uncommitted-read default
 
     uint8_t v = c.out[c.out_pos++];
     if (c.out_pos >= c.out_len) {
@@ -94,12 +106,13 @@ void SlaveHle::queue_response(int out_channel, const uint8_t* data, int len) {
 
 bool SlaveHle::irq2_asserted() const {
     auto busy = [this](int channel) { return channels_[channel].out_pos < channels_[channel].out_len; };
-    return (pointer_enabled_ && busy(0)) || (reply_irq_enabled_ && busy(2)) || (status_forwarding_ && busy(3));
+    return (pointer_enabled_ && busy(kChannelPointer)) || (reply_irq_enabled_ && busy(kChannelControl)) ||
+           (status_forwarding_ && busy(kChannelStatus));
 }
 
 void SlaveHle::queue_master_volume_reply() {
-    uint8_t r[2] = {0xf5, uint8_t(master_ & 0x3f)};
-    queue_response(2, r, 2);
+    uint8_t r[2] = {kSysMasterVolume, uint8_t(master_ & kMasterDb)};
+    queue_response(kChannelControl, r, 2);
 }
 
 // As MAME slave_w: an unmatched byte resets the channel's input at once, and
@@ -109,138 +122,135 @@ void SlaveHle::handle_write(int channel, uint8_t v) {
 
     if (c.in_len == 0) {
         switch (channel) {
-            case 0:
+            case kChannelPointer:
                 // Set Pointer Position (cdichips mc6805slave.md), no response.
-                if (v >= 0xc0) {
+                if (v >= kPtrSetPosition) {
                     c.in[0] = v;
                     c.in_len = 1;
                     return;
                 }
-                // 0x80-0xbf decode on the low nibble (0x3b6).
                 if (v < 0x80) return;
-                if ((v & 0x0f) == 0x03) {
+                if ((v & 0x0f) == kPtrEnable) {
                     pointer_enabled_ = true;
                     return;
                 }
-                if ((v & 0x0f) == 0x04) {
+                if ((v & 0x0f) == kPtrDisable) {
                     pointer_enabled_ = false;
                     return;
                 }
                 return; // anything else: immediately ignored, no state change
-            case 1: return; // no opcode starts a sequence on this channel
-            case 2:
+            case kChannelLcd: return; // no opcode starts a sequence on this channel
+            case kChannelControl:
                 // Bit 7 set = a command on its own (firmware 0x48d). 0xf0 (LCD) takes no
                 // bytes here; its text comes on channel 1, unlike MAME's 16-byte form.
                 if (level_mode_ || v < 0x80) {
                     channel2_data(v);
                     return;
                 }
-                if (v >= 0xc0) {
-                    if (v < 0xd0) {
+                if (v >= kCtlAttenuation) {
+                    if (v < kCtlAttenuationEnd) {
                         att_command_ = v & 0x7f;
                         data_count_ = 0;
                     }
-                    return; // 0xd0-0xff (0xf0 included) set state we don't use
+                    return; // 0xd0-0xff (LCD 0xf0 included) set state we don't use
                 }
                 switch (v) {
-                    case 0x82: // mute, fading out
+                    case kCtlMute: // fading out
                         if (muted_) return;
                         muted_ = true;
                         start_fade();
                         return;
-                    case 0x83: // unmute, fading in; 0x84 also sets port C bit 7,
-                    case 0x84: // which drives nothing audible
+                    case kCtlUnmute: // fading in
+                    case kCtlUnmutePc7:
                         if (!muted_) return;
                         muted_ = false;
                         start_fade();
                         return;
-                    case 0x85: // master volume: start ramping louder
-                    case 0x86: // ... softer
+                    case kCtlMasterLouder: // start ramping
+                    case kCtlMasterSofter:
                         if (!master_enabled_) return;
-                        if (v == 0x85) {
-                            master_ = uint8_t((master_ & 0x3f) | 0x40);
-                            if (master_ & 0x3f) --master_;
+                        if (v == kCtlMasterLouder) {
+                            master_ = uint8_t((master_ & kMasterDb) | kMasterRampLouder);
+                            if (master_ & kMasterDb) --master_;
                         } else {
-                            master_ = uint8_t((master_ & 0x3f) | 0x80);
-                            if ((master_ & 0x3f) < kMaxMasterDb) ++master_;
+                            master_ = uint8_t((master_ & kMasterDb) | kMasterRampSofter);
+                            if ((master_ & kMasterDb) < kMaxMasterDb) ++master_;
                         }
                         ramp_count_ = ramp_reload_;
                         dim_ = false;
                         apply_dacs();
                         return;
-                    case 0x87: // stop the ramp
-                        master_ &= 0x3f;
+                    case kCtlMasterStop:
+                        master_ &= kMasterDb;
                         queue_master_volume_reply();
                         return;
-                    case 0x88: master_enabled_ = !master_enabled_; return;
+                    case kCtlMasterToggle: master_enabled_ = !master_enabled_; return;
                     // To the servo as A6/A7/A8 (command table 0x51d; A8 stops the disc and opens,
                     // cdapdriv SetStat 0x54 sends 0x93); its disc status reports are forwarded.
-                    case 0x89:
-                    case 0x92:
-                    case 0x93: {
-                        const uint8_t cmd[4] = {uint8_t(v == 0x89 ? 0xa6 : v == 0x92 ? 0xa7 : 0xa8), 0, 0, 0};
+                    case kCtlTrayOpen:
+                    case kCtlTrayClose:
+                    case kCtlStopAndOpen: {
+                        const uint8_t cmd[4] = {v == kCtlTrayOpen    ? kServoTrayOpen
+                                                : v == kCtlTrayClose ? kServoTrayClose
+                                                                     : kServoStopAndOpen,
+                                                0, 0, 0};
                         servo_command(cmd);
                         return;
                     }
-                    case 0x8a: // Reset main cpu
-                        reset_requested_ = true;
-                        return;
-                    case 0x8f: // toggle the 20 dB dim
+                    case kCtlResetCpu: reset_requested_ = true; return;
+                    case kCtlDim:
                         dim_ = !dim_;
                         apply_dacs();
                         return;
-                    case 0x90: // master level and ramp rate follow
+                    case kCtlMasterLevel:
                         if (!master_enabled_) return;
                         level_mode_ = true;
                         data_count_ = 0;
                         return;
                     default: return;
                 }
-            case 3:
+            case kChannelStatus:
                 switch (v) {
-                    case 0xf0: {
-                        // Revision 2.0, then the servo's 0xa3 byte (firmware 0xf19).
-                        uint8_t r[3] = {0xf0, 0x20, servo_version_};
-                        queue_response(2, r, 3);
+                    case kSysVersion: {
+                        // Then the servo's 0xa3 byte (firmware 0xf19).
+                        uint8_t r[3] = {kSysVersion, kSlaveRevision, servo_version_};
+                        queue_response(kChannelControl, r, 3);
                         return;
                     }
-                    case 0xf3: { // 0x457
-                        uint8_t r[2] = {0xf3, uint8_t(front_type_)};
-                        queue_response(2, r, 2);
+                    case kSysFrontDevice: { // 0x457
+                        uint8_t r[2] = {kSysFrontDevice, uint8_t(front_type_)};
+                        queue_response(kChannelControl, r, 2);
                         return;
                     }
-                    case 0xf4: {
-                        uint8_t r[2] = {0xf4, 0x00};
-                        queue_response(2, r, 2);
+                    case kSysTestPlug: {
+                        uint8_t r[2] = {kSysTestPlug, 0x00};
+                        queue_response(kChannelControl, r, 2);
                         return;
-                    } // test plug
-                    case 0xf5: queue_master_volume_reply(); return;
-                    case 0xf6: {
+                    }
+                    case kSysMasterVolume: queue_master_volume_reply(); return;
+                    case kSysVideoStandard: {
                         // Firmware 0xf9a: ((RAM $5a & 4) >> 2) + 1 from the STAND pin; the BIOS
                         // polls it before 0xf8 and programs 50 Hz for 2 (cdi220b 0x400f16).
-                        uint8_t r[2] = {0xf6, static_cast<uint8_t>(video_standard_)};
-                        queue_response(2, r, 2);
+                        uint8_t r[2] = {kSysVideoStandard, static_cast<uint8_t>(video_standard_)};
+                        queue_response(kChannelControl, r, 2);
                         return;
                     }
-                    case 0xf8: // sldriv init
+                    case kSysReplyIrqOn: // sldriv init
                         reply_irq_enabled_ = true;
                         return;
-                    case 0xf9: reply_irq_enabled_ = false; return;
-                    case 0xfa: // forward the servo's messages (disc status)
+                    case kSysReplyIrqOff: reply_irq_enabled_ = false; return;
+                    case kSysForwardOn: // forward the servo's disc status messages
                         status_forwarding_ = true;
                         return;
-                    case 0xfb: // stop forwarding them
-                        status_forwarding_ = false;
-                        return;
-                    case 0xfc:
+                    case kSysForwardOff: status_forwarding_ = false; return;
+                    case kSysPc6High:
                         pc6_ticks_ = 2;
                         pc6_ = Pc6::kHigh;
                         return;
-                    case 0xfd: pc6_ = Pc6::kReleased; return;
+                    case kSysPc6Release: pc6_ = Pc6::kReleased; return;
                     default:
-                        // 0x80-0xef start a 4-byte command; all but 0x80/0x81 go to the servo
-                        // (firmware 0x3da), e.g. through cdapdriv SetStat 0x52.
-                        if (v < 0x80 || v >= 0xf0) return;
+                        // All but 0x80/0x81 go to the servo (firmware 0x3da), e.g. through cdapdriv SetStat 0x52.
+                        if (v < kSysFourByte || v >= kSysVersion) return;
                         c.in[0] = v;
                         c.in_len = 1;
                         return;
@@ -252,22 +262,22 @@ void SlaveHle::handle_write(int channel, uint8_t v) {
     // Continuation of channel 0's Set Pointer Position or a channel 3 command.
     if (c.in_len < static_cast<int>(sizeof(c.in))) c.in[c.in_len++] = v;
 
-    if (channel == 3) {
+    if (channel == kChannelStatus) {
         if (c.in_len == 4) {
             c.in_len = 0;
             servo_command(c.in);
         }
         return;
     }
-    if (channel == 0 && c.in_len == 3) {
+    if (channel == kChannelPointer && c.in_len == 3) {
         // Set Pointer Position (0x39d, 0xe5c).
         const uint8_t b0 = c.in[0];
         const uint8_t b1 = c.in[1];
         const uint8_t b2 = c.in[2];
         pointer_x_ = int16_t(((b1 & 0x70) << 3) | (b2 & 0x7f));
         pointer_y_ = int16_t(((b1 & 0x0f) << 6) | (b0 & 0x3f));
-        channels_[0].out_len = 0;
-        channels_[0].out_pos = 0;
+        channels_[kChannelPointer].out_len = 0;
+        channels_[kChannelPointer].out_pos = 0;
         c.in_len = 0;
         return;
     }
@@ -276,27 +286,27 @@ void SlaveHle::handle_write(int channel, uint8_t v) {
 // SERVO firmware 2.1 command dispatch (0x1698); its replies reach channel 3 only after 0xfa.
 void SlaveHle::servo_command(const uint8_t cmd[4]) {
     switch (cmd[0]) {
-        case 0xb0: // Request Disc Status: answered on the next poll
+        case kServoDiscStatus: // answered on the next poll
             report_disc_status();
             return;
-        case 0xa6: // open the tray, unless open or opening
-            if (tray_state_ <= 5 && tray_state_ != 1) tray_request_open();
+        case kServoTrayOpen: // unless open or opening
+            if (tray_state_ <= kTrayClosed && tray_state_ != kTrayOpen) tray_request_open();
             return;
-        case 0xa8: // stop the disc and open, whatever the tray is doing
+        case kServoStopAndOpen: // whatever the tray is doing
             tray_request_open();
             return;
-        case 0xa7: // close it, unless closed
-            if (tray_state_ != 5) tray_request_close();
+        case kServoTrayClose: // unless closed
+            if (tray_state_ != kTrayClosed) tray_request_close();
             return;
-        case 0xa3: { // version 2.x (0x1833); the SLAVE keeps byte 1 either way (0xc55)
-            uint8_t r[4] = {0xa3, 0x20, 0x00, 0x00};
+        case kServoVersion: { // 0x1833; the SLAVE keeps byte 1 either way (0xc55)
+            uint8_t r[4] = {kServoVersion, kServoRevision, 0x00, 0x00};
             servo_version_ = r[1];
-            if (status_forwarding_) queue_response(3, r, 4);
+            if (status_forwarding_) queue_response(kChannelStatus, r, 4);
             return;
         }
-        case 0xa4: { // echo (0x1863)
-            uint8_t r[4] = {0xa4, cmd[1], cmd[2], cmd[3]};
-            if (status_forwarding_) queue_response(3, r, 4);
+        case kServoEcho: { // 0x1863
+            uint8_t r[4] = {kServoEcho, cmd[1], cmd[2], cmd[3]};
+            if (status_forwarding_) queue_response(kChannelStatus, r, 4);
             return;
         }
         default: return; // 0x80/0x81 stay in the SLAVE; b1 has no reply without a second session
@@ -305,7 +315,7 @@ void SlaveHle::servo_command(const uint8_t cmd[4]) {
 
 void SlaveHle::set_tray_open(bool open) {
     if (open == tray_open_) return;
-    const uint8_t cmd[4] = {uint8_t(open ? 0xa6 : 0xa7), 0, 0, 0};
+    const uint8_t cmd[4] = {open ? kServoTrayOpen : kServoTrayClose, 0, 0, 0};
     servo_command(cmd);
 }
 
@@ -317,7 +327,7 @@ constexpr uint8_t kTrayStepFrames[10] = {0, 0, 6, 30, 4, 50, 10, 10, 30, 2};
 constexpr uint8_t kTrayNextState[10] = {0, 1, 3, 4, 5, 5, 7, 8, 9, 1};
 } // namespace
 
-// Open request by tray state (table 0x1b83): closed starts at 6; moving trays reverse to 2.
+// Open request by tray state (table 0x1b83): closed starts kTrayOpening; moving trays reverse to kTrayClosing.
 void SlaveHle::tray_request_open() {
     static constexpr uint8_t kTo[10] = {7, 2, 7, 7, 7, 6, 0, 2, 2, 2};
     if (kTo[tray_state_]) enter_tray_state(kTo[tray_state_]);
@@ -331,7 +341,7 @@ void SlaveHle::tray_request_close() {
 
 void SlaveHle::enter_tray_state(uint8_t state) {
     tray_state_ = state;
-    tray_open_ = state == 1 || state >= 6;
+    tray_open_ = state == kTrayOpen || state >= kTrayOpening;
     tray_timer_ = kTrayStepFrames[state];
     report_disc_status();
 }
@@ -341,15 +351,16 @@ void SlaveHle::report_disc_status() {
     // Type 00 until the TOC is read (0x1acb clears it), then 01 audio, 03 no disc.
     // Servo 2.1 gives 0x02 for a CD-i TOC (disc type 0x10, Green Book VII.10.1.a), as our CDIC TOC
     // says; kept at 0x04 as measured on a 210/05 (CDi_MiSTer). The BIOS treats 0x02 and 0x04 alike.
-    uint8_t type = 0x00;
-    if (tray_state_ == 5 && tray_timer_ == 0) type = !disc_present_ ? 0x03 : disc_audio_ ? 0x01 : 0x04;
-    uint8_t r[4] = {0xb0, 0x00, type, uint8_t(0x20 | tray_state_)};
-    if (status_forwarding_) queue_response(3, r, 4);
+    uint8_t type = kDiscUnknown;
+    if (tray_state_ == kTrayClosed && tray_timer_ == 0)
+        type = !disc_present_ ? kDiscNone : disc_audio_ ? kDiscAudio : kDiscCdi;
+    uint8_t r[4] = {kServoDiscStatus, 0x00, type, uint8_t(0x20 | tray_state_)};
+    if (status_forwarding_) queue_response(kChannelStatus, r, 4);
 }
 
 void SlaveHle::tick_frame() {
     if (tray_timer_ == 0 || --tray_timer_ != 0) return;
-    if (tray_state_ == 5) {
+    if (tray_state_ == kTrayClosed) {
         report_disc_status(); // the TOC is read: the disc type is known
         return;
     }
@@ -406,13 +417,13 @@ void SlaveHle::output_compare_tick() {
         return;
     }
     ramp_count_ = ramp_reload_;
-    if (master_ & 0x40) {
-        if (master_ & 0x3f) {
+    if (master_ & kMasterRampLouder) {
+        if (master_ & kMasterDb) {
             --master_;
             apply_dacs();
         }
-    } else if (master_ & 0x80) {
-        if ((master_ & 0x3f) < kMaxMasterDb) {
+    } else if (master_ & kMasterRampSofter) {
+        if ((master_ & kMasterDb) < kMaxMasterDb) {
             ++master_;
             apply_dacs();
         }
@@ -436,18 +447,18 @@ void SlaveHle::channel2_data(uint8_t v) {
     ++data_count_;
     if (level_mode_) {
         if (data_count_ == 1) {
-            if (v == 0xff) return;
+            if (v == kCtlLevelUnchanged) return;
             ramp_count_ = 0;
             if ((v & 0xc0) == 0x00) {
-                master_ = uint8_t((v & 0x3f) | 0x40);
+                master_ = uint8_t((v & kMasterDb) | kMasterRampLouder);
             } else if ((v & 0xc0) == 0x40) {
-                master_ = uint8_t((v & 0x3f) | 0x80);
-            } else if (master_ & 0xc0) {
-                master_ &= 0x3f; // a ramp was running: only stop it
+                master_ = uint8_t((v & kMasterDb) | kMasterRampSofter);
+            } else if (master_ & kMasterRamp) {
+                master_ &= kMasterDb; // a ramp was running: only stop it
                 queue_master_volume_reply();
                 return;
             } else {
-                master_ = v & 0x3f;
+                master_ = v & kMasterDb;
                 dim_ = false;
                 apply_dacs();
                 queue_master_volume_reply();
@@ -457,7 +468,7 @@ void SlaveHle::channel2_data(uint8_t v) {
             apply_dacs();
             return;
         }
-        if (data_count_ == 2 && v != 0xff) ramp_reload_ = v;
+        if (data_count_ == 2 && v != kCtlLevelUnchanged) ramp_reload_ = v;
         level_mode_ = false;
         data_count_ = 0;
         return;
@@ -470,7 +481,7 @@ void SlaveHle::channel2_data(uint8_t v) {
 
 // Firmware 0xafe.
 uint8_t SlaveHle::dac_code(uint8_t db, bool forced_mute) const {
-    unsigned total = (forced_mute ? 0x3f : db) + (master_ & 0x3fu) + (dim_ ? 0x14u : 0u);
+    unsigned total = (forced_mute ? kForcedMuteDb : db) + (master_ & kMasterDb) + (dim_ ? kDimDb : 0u);
     if (total >= sizeof(kDacCodeForDb)) return 0;
     const uint8_t code = kDacCodeForDb[total];
     if (fading_) return uint8_t((code * fade_gain()) >> 8);
@@ -563,13 +574,16 @@ void SlaveHle::sci_receive(uint8_t byte, bool framing_error) {
 
 namespace {
 // 0x7a8.
-uint8_t report_buttons(uint8_t v) { return uint8_t((v & 0x10 ? 0x20 : 0) | (v & 0x20 ? 0x10 : 0)); }
+uint8_t report_buttons(uint8_t v) {
+    return uint8_t((v & kPacketButton2 ? kReportButton2 : kReportNone) |
+                   (v & kPacketButton1 ? kReportButton1 : kReportNone));
+}
 } // namespace
 
 // 0x781.
 void SlaveHle::relative_byte(uint8_t v) {
     const uint8_t count = packet_count_++;
-    if (v & 0x40) {
+    if (v & kPacketSync) {
         packet_count_ = 0;
         if (count == 2) {
             sync_lost_once_ = false;
@@ -594,8 +608,8 @@ void SlaveHle::relative_byte(uint8_t v) {
     }
     packet_y_ |= v;
     // Main loop 0xd90.
-    pointer_x_ = int16_t(std::clamp(pointer_x_ + int8_t(packet_x_), 0, 0x2ff));
-    pointer_y_ = int16_t(std::clamp(pointer_y_ + int8_t(packet_y_), 0, 0x22f));
+    pointer_x_ = int16_t(std::clamp(pointer_x_ + int8_t(packet_x_), 0, kPointerMaxX));
+    pointer_y_ = int16_t(std::clamp(pointer_y_ + int8_t(packet_y_), 0, kPointerMaxY));
     buttons_ = packet_buttons_;
     publish_pointer();
 }
@@ -603,7 +617,7 @@ void SlaveHle::relative_byte(uint8_t v) {
 // 0x719.
 void SlaveHle::absolute_byte(uint8_t v) {
     const uint8_t count = packet_count_++;
-    if (v & 0x40) {
+    if (v & kPacketSync) {
         packet_count_ = 0;
         if (count == 0) {
             sync_lost_once_ = false;
@@ -647,7 +661,7 @@ void SlaveHle::publish_pointer() {
         uint8_t((pointer_y_ >> 7) & 0x07),
         uint8_t(pointer_y_ & 0x7f),
     };
-    queue_response(0, report, 4);
+    queue_response(kChannelPointer, report, 4);
 }
 
 } // namespace mamecdi

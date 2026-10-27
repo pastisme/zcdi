@@ -5,6 +5,202 @@
 namespace zcdi {
 namespace mamecdi {
 
+// Register values, as Mcd212SaveState and plane memory hold them (names after same_cdi).
+namespace mcd212 {
+
+// MMIO byte offsets from 0x4fffe0; the "1" registers are path 0.
+enum MmioOffset : uint32_t {
+    kCsr2W = 0x00,
+    kCsr2R = 0x01,
+    kDcr2 = 0x02,
+    kVsr2 = 0x04,
+    kDdr2 = 0x08,
+    kDca2 = 0x0a,
+    kCsr1W = 0x10,
+    kCsr1R = 0x11,
+    kDcr1 = 0x12,
+    kVsr1 = 0x14,
+    kDdr1 = 0x18,
+    kDca1 = 0x1a,
+};
+
+// CSR1R/CSR2R.
+enum CsrRead : uint8_t {
+    kCsr2rIt2 = 0x02,
+    kCsr2rIt1 = 0x04,
+    kCsr1rPa = 0x20, // parity (odd/even field)
+    kCsr1rDa = 0x80, // display active
+};
+
+// CSR1W/CSR2W. DI masks the IRQ1 pin only; IT1/IT2 still latch (mcd212.sv:203-204).
+enum CsrWrite : uint16_t {
+    kCsr1wSt = 0x0002,
+    kCsrWDi = 0x8000,
+};
+
+// DCR1/DCR2, bits 0-5 being VSR's high address bits. SM, FD and CF are DCR1 only.
+enum Dcr : uint16_t {
+    kDcrDc = 0x0100, // DCA enable (mcd212.sv:499-513)
+    kDcrIc = 0x0200, // ICA enable
+    kDcrCm = 0x0800,
+    kDcr1Sm = 0x1000, // scan mode: interlace
+    kDcr1Fd = 0x2000,
+    kDcr1Cf = 0x4000,
+    kDcrDe = 0x8000,
+};
+
+// DDR file type (bits 8-9) and Pixel Repeat factor (bits 10-11).
+enum DdrShift : int {
+    kDdrFtShift = 8,
+    kDdrMtShift = 10,
+};
+enum FileType : uint8_t {
+    kDdrFtBitmap = 0x0,
+    kDdrFtRle = 0x2,
+    kDdrFtMosaic = 0x3, // Pixel Repeat
+};
+
+// ICA/DCA instructions, each the first opcode of its range (same_cdi process_ica).
+enum Command : uint8_t {
+    kCmdStop = 0x00,
+    kCmdNop = 0x10,
+    kCmdReloadDcp = 0x20,
+    kCmdReloadDcpStop = 0x30,
+    kCmdReloadVsr = 0x40,
+    kCmdReloadVsrStop = 0x50,
+    kCmdInterrupt = 0x60,
+    kCmdUndefined = 0x70,
+    kCmdReloadDisplayParams = 0x78,
+    kCmdSetRegister = 0x80, // the opcode is the register number
+};
+
+// ICA start in plane memory; even interlaced fields skip one instruction.
+enum IcaStart : uint32_t {
+    kIcaStart = 0x400u,
+    kIcaStartEvenField = 0x404u,
+};
+constexpr int kIcaMaxCommands = 1920; // 3840 16-bit words / 2 words-per-command
+constexpr int kDcaBudgetBytes = 64; // real hardware budgets exactly 64 bytes/line
+
+// Registers set by ICA/DCA instructions (same_cdi set_register).
+enum Register : uint8_t {
+    kRegClut = 0x80, // 0x80-0xbf: 64 entries of the selected bank
+    kRegImageCodingMethod = 0xc0,
+    kRegTransparencyControl = 0xc1,
+    kRegPlaneOrder = 0xc2,
+    kRegClutBank = 0xc3,
+    kRegTransparentColorA = 0xc4,
+    kRegTransparentColorB = 0xc6,
+    kRegMaskColorA = 0xc7,
+    kRegMaskColorB = 0xc9,
+    kRegDyuvAbsStartA = 0xca,
+    kRegDyuvAbsStartB = 0xcb,
+    kRegCursorPosition = 0xcd,
+    kRegCursorControl = 0xce,
+    kRegCursorPattern = 0xcf,
+    kRegRegionControl = 0xd0, // 0xd0-0xd7
+    kRegBackdropColor = 0xd8,
+    kRegPixelHoldA = 0xd9,
+    kRegPixelHoldB = 0xda,
+    kRegWeightFactorA = 0xdb,
+    kRegWeightFactorB = 0xdc,
+};
+
+constexpr int kClutBankSize = 64;
+constexpr uint8_t kClutPlaneB = 0x80; // CLUT index of bank 2, plane B's half
+// CLUT entries and color keys hold 6 bits per channel.
+constexpr uint32_t kColorBits = 0x00fcfcfcu;
+
+// Image Coding Method flags (same_cdi ICM_*).
+enum Icm : uint32_t {
+    kIcmEv = 0x040000u, // External Video
+    kIcmNr = 0x080000u, // number of region flags (same_cdi ICM_NM)
+    kIcmCs = 0x400000u, // CLUT select
+};
+
+// A plane's coding method, Mcd212SaveState::icm_.
+enum CodingMethod : uint8_t {
+    kIcmOff = 0x0,
+    kIcmClut8 = 0x1,
+    kIcmRgb555 = 0x1, // plane B, with plane A off
+    kIcmClut7 = 0x3,
+    kIcmClut77 = 0x4,
+    kIcmDyuv = 0x5,
+    kIcmClut4 = 0xb, // CLUT4, or RL3 with run-length decode
+};
+
+// Transparency Control: a 4-bit condition per plane, plane B's at bit 8 (same_cdi TCR_*).
+constexpr int kTcrPlaneBShift = 8;
+enum TransparencyControl : uint32_t {
+    kTcrAlways = 0x0,
+    kTcrKey = 0x1,
+    kTcrRgb = 0x2, // RGB555 T bit
+    kTcrRf0 = 0x3,
+    kTcrRf1 = 0x4,
+    kTcrRf0Key = 0x5,
+    kTcrRf1Key = 0x6,
+    kTcrCondition = 0x07,
+    kTcrInvert = 0x08, // 8-15 invert 0-7
+    kTcrNotKey = 0x9,
+    kTcrField = 0x0f,
+    kTcrDisableMx = 0x800000u,
+};
+
+constexpr uint8_t kPorBa = 0x01; // Plane Order: B in front of A
+constexpr uint32_t kPixelHoldEnable = 0x800000u;
+
+// Region Control fields (same_cdi RC_X/RC_WF/RC_RF_BIT/RC_OP).
+enum RegionControl : uint32_t {
+    kRcX = 0x0003ffu, // Double Resolution column
+    kRcWf = 0x00fc00u,
+    kRcOp = 0xf00000u,
+};
+enum RegionControlShift : int {
+    kRcWfShift = 10,
+    kRcRfBit = 16,
+    kRcOpShift = 20,
+};
+
+// Region Control operations (Green Book V.5.10.2); the others do nothing.
+enum RegionOp : uint32_t {
+    kRcOpEnd = 0,
+    kRcOpWfA = 4,
+    kRcOpWfB = 6,
+    kRcOpResetRf = 8,
+    kRcOpSetRf = 9,
+    kRcOpWfAResetRf = 12,
+    kRcOpWfASetRf = 13,
+    kRcOpWfBResetRf = 14,
+    kRcOpWfBSetRf = 15,
+};
+
+// Cursor Control, per mcd212.sv's cursor_control_register (same_cdi's
+// CURCNT_CON 0x280000 is not contiguous). Periods are in units of 12 frames.
+enum CursorControl : uint32_t {
+    kCurcntColor = 0x00000fu, // a 4bpp palette index
+    kCurcntCuw = 0x008000u, // 1 Double Resolution pixel per pattern bit, else 2
+    kCurcntCofMask = 0x070000u, // "off"/complementary period
+    kCurcntConMask = 0x380000u, // "on" period
+    kCurcntBlkc = 0x400000u, // blink type (0=on/off, 1=normal/complementary)
+    kCurcntEn = 0x800000u,
+};
+enum CursorControlShift : int {
+    kCurcntCofShift = 16,
+    kCurcntConShift = 19,
+};
+constexpr int kCursorBlinkSubPeriodFrames = 12; // mcd212.sv CURSOR_BLINK_PERIOD
+
+// Fixed palette for Backdrop Color and kCurcntColor, XRGB (same_cdi s_4bpp_color).
+constexpr uint32_t k4bppColor[16] = {
+    0x101010, 0x10107a, 0x107a10, 0x107a7a, 0x7a1010, 0x7a107a, 0x7a7a10, 0x7a7a7a,
+    0x101010, 0x1010e6, 0x10e610, 0x10e6e6, 0xe61010, 0xe610e6, 0xe6e610, 0xe6e6e6,
+};
+
+// DYUV delta per 4-bit code (same_cdi s_dyuv_deltas).
+constexpr uint8_t kDyuvDeltas[16] = {0, 1, 4, 9, 16, 27, 44, 79, 128, 177, 212, 229, 240, 247, 252, 255};
+
+} // namespace mcd212
+
 struct Mcd212SaveState {
     // Normal Resolution pixels per line; the framebuffer is Double Resolution.
     static constexpr int kLineWidth = 384;
@@ -23,27 +219,27 @@ struct Mcd212SaveState {
     uint32_t dca_[2] = {};
 
     uint32_t clut_[256] = {}; // XRGB, 6 bits/channel; shared by both paths
-    uint8_t clut_bank_[2] = {0, 0}; // reg 0xc3, per path
-    uint8_t icm_[2] = {0, 0}; // reg 0xc0 MODE1 (bits 0-3) / MODE2 (bits 8-11)
-    bool icm_nr_ = false; // ICM bit 19
-    bool icm_cs_ = false; // ICM bit 22
-    bool icm_ev_ = false; // ICM bit 18, External Video enable
-    uint32_t dyuv_abs_start_[2] = {0, 0}; // reg 0xca/0xcb: Y<<16|U<<8|V
+    uint8_t clut_bank_[2] = {0, 0}; // kRegClutBank, per path
+    uint8_t icm_[2] = {0, 0}; // mcd212::CodingMethod; kRegImageCodingMethod bits 0-3 / 8-11
+    bool icm_nr_ = false; // kIcmNr
+    bool icm_cs_ = false; // kIcmCs
+    bool icm_ev_ = false; // kIcmEv
+    uint32_t dyuv_abs_start_[2] = {0, 0}; // kRegDyuvAbsStartA/B: Y<<16|U<<8|V
 
-    uint32_t transparency_control_ = 0; // reg 0xc1
-    uint8_t plane_order_ = 0; // reg 0xc2; only bit 0 is used
-    uint32_t transparent_color_[2] = {0, 0}; // reg 0xc4/0xc6
-    uint32_t mask_color_[2] = {0, 0}; // reg 0xc7/0xc9
-    uint8_t backdrop_color_ = 0; // reg 0xd8: index into k4bppColor, not RGB
-    uint32_t pixel_hold_[2] = {}; // reg 0xd9/0xda
-    // reg 0xdb/0xdc: only the x=0 seed for weight_factor_line_.
+    uint32_t transparency_control_ = 0; // mcd212::TransparencyControl
+    uint8_t plane_order_ = 0; // only kPorBa is used
+    uint32_t transparent_color_[2] = {0, 0}; // kRegTransparentColorA/B
+    uint32_t mask_color_[2] = {0, 0}; // kRegMaskColorA/B
+    uint8_t backdrop_color_ = 0; // a 4bpp palette index, not RGB
+    uint32_t pixel_hold_[2] = {}; // kRegPixelHoldA/B
+    // kRegWeightFactorA/B: only the x=0 seed for weight_factor_line_.
     uint8_t weight_factor_[2] = {0, 0};
-    uint32_t region_control_[8] = {}; // reg 0xd0-0xd7, shared by both paths
+    uint32_t region_control_[8] = {}; // mcd212::RegionControl, shared by both paths
     // NR as of the last Region Control / weight write; the region arrays use it.
     bool region_arrays_nr_ = false;
 
-    uint32_t cursor_position_ = 0; // reg 0xcd
-    uint32_t cursor_control_ = 0; // reg 0xce
+    uint32_t cursor_position_ = 0; // kRegCursorPosition
+    uint32_t cursor_control_ = 0; // mcd212::CursorControl
     uint16_t cursor_pattern_[16] = {};
 
     int cursor_blink_framecnt_ = 0; // 0-11, frames within one 12-frame sub-period

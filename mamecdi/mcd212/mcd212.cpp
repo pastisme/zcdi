@@ -11,19 +11,9 @@
 namespace zcdi {
 namespace mamecdi {
 
+using namespace mcd212;
+
 namespace {
-// Register byte offsets relative to 0x4fffe0.
-constexpr uint32_t kCsr2W = 0x00, kCsr2R = 0x01, kDcr2 = 0x02, kVsr2 = 0x04, kDdr2 = 0x08, kDca2 = 0x0a;
-constexpr uint32_t kCsr1W = 0x10, kCsr1R = 0x11, kDcr1 = 0x12, kVsr1 = 0x14, kDdr1 = 0x18, kDca1 = 0x1a;
-
-constexpr uint8_t kCsr1rDa = 0x80; // display active
-constexpr uint8_t kCsr1rPa = 0x20; // parity (odd/even field)
-constexpr uint8_t kCsr2rIt2 = 0x02;
-constexpr uint8_t kCsr2rIt1 = 0x04;
-
-constexpr uint8_t kIcmClut4 = 0x0b; // CLUT4, or RL3 with run-length decode
-constexpr uint8_t kIcmDyuv = 0x05;
-
 // What a plane shows where it has no pixels.
 constexpr uint32_t kStudioBlack = 0x00101010u;
 
@@ -52,20 +42,6 @@ void fetch_codes(uint8_t* dst, int count, const uint8_t* ram, std::size_t start,
             dst[i + k] = code;
     }
 }
-// Active area (datasheet tables 5-4/5-6, video_timing.sv): 240 lines with
-// FD or ST, else 280; 384 pixels with CF and not ST, else 360.
-constexpr uint16_t kCsr1wSt = 0x0002;
-constexpr uint16_t kDcr1Sm = 0x1000; // scan mode: interlace
-constexpr uint16_t kDcr1Fd = 0x2000;
-constexpr uint16_t kDcr1Cf = 0x4000;
-
-// DCR IC (ICA enable) and DC (DCA enable), mcd212.sv:499-513.
-constexpr uint16_t kDcrIc = 0x0200;
-constexpr uint16_t kDcrDc = 0x0100;
-
-// CSR1W/CSR2W DI: masks the IRQ1 pin only; IT1/IT2 still latch (mcd212.sv:203-204).
-constexpr uint16_t kCsrWDi = 0x8000;
-
 uint32_t read_be32(const uint8_t* p) {
     return (uint32_t(p[0]) << 24) | (uint32_t(p[1]) << 16) | (uint32_t(p[2]) << 8) | p[3];
 }
@@ -80,7 +56,7 @@ void split_address(uint16_t& high_reg, uint16_t& low_reg, uint32_t address) {
 }
 
 // Pixel Repeat factor from DDR bits 10-11.
-int pixel_repeat(uint16_t ddr) { return 2 << ((ddr >> 10) & 0x3); }
+int pixel_repeat(uint16_t ddr) { return 2 << ((ddr >> kDdrMtShift) & 0x3); }
 
 // ICA's plain RELOAD VSR only moves the walker. The low 19 bits are a word
 // index, so the byte offset is the masked value with bit 0 cleared.
@@ -184,81 +160,81 @@ void Mcd212::write_byte(uint32_t offset, uint8_t v) {
 }
 
 void Mcd212::set_register(int path, uint8_t reg, uint32_t value) {
-    if (reg >= 0x80 && reg <= 0xbf) {
-        // Into the 64-entry quarter this path's 0xc3 bank selects.
-        std::size_t clut_index = std::size_t(clut_bank_[path & 1]) * 0x40 + (reg - 0x80);
-        clut_[clut_index] = value & 0x00fcfcfcu;
+    if (reg >= kRegClut && reg < kRegImageCodingMethod) {
+        // Into the 64-entry quarter this path's CLUT bank selects.
+        std::size_t clut_index = std::size_t(clut_bank_[path & 1]) * kClutBankSize + (reg - kRegClut);
+        clut_[clut_index] = value & kColorBits;
         return;
     }
-    if (reg >= 0xd0 && reg <= 0xd7) {
+    if (reg >= kRegRegionControl && reg < kRegBackdropColor) {
         // Either path may write Region Control (same_cdi).
-        region_control_[reg - 0xd0] = value;
+        region_control_[reg - kRegRegionControl] = value;
         invalidate_region_arrays();
         return;
     }
     switch (reg) {
-        case 0xc0:
+        case kRegImageCodingMethod:
             if (path != 0) return;
-            // Image Coding Method: both planes' modes plus NR/EV/CS.
+            // Both planes' modes (bits 0-3, 8-11) plus NR/EV/CS.
             icm_[0] = uint8_t(value & 0x0f);
             icm_[1] = uint8_t((value >> 8) & 0x0f);
-            icm_nr_ = (value & 0x080000u) != 0;
-            icm_ev_ = (value & 0x040000u) != 0;
-            icm_cs_ = (value & 0x400000u) != 0;
+            icm_nr_ = (value & kIcmNr) != 0;
+            icm_ev_ = (value & kIcmEv) != 0;
+            icm_cs_ = (value & kIcmCs) != 0;
             return;
-        case 0xc1:
+        case kRegTransparencyControl:
             if (path == 0) transparency_control_ = value;
             return;
-        case 0xc2:
+        case kRegPlaneOrder:
             if (path == 0) plane_order_ = uint8_t(value & 0x07);
             return;
-        case 0xc3:
+        case kRegClutBank:
             // Path 1 can only reach banks 2-3 (hardware, as same_cdi).
             clut_bank_[path & 1] = (path == 0) ? uint8_t(value & 0x03) : uint8_t(0x02 | (value & 0x01));
             return;
-        case 0xc4:
-            if (path == 0) transparent_color_[0] = value & 0x00fcfcfcu;
+        case kRegTransparentColorA:
+            if (path == 0) transparent_color_[0] = value & kColorBits;
             return;
-        case 0xc6:
-            if (path == 1) transparent_color_[1] = value & 0x00fcfcfcu;
+        case kRegTransparentColorB:
+            if (path == 1) transparent_color_[1] = value & kColorBits;
             return;
-        case 0xc7:
-            if (path == 0) mask_color_[0] = value & 0x00fcfcfcu;
+        case kRegMaskColorA:
+            if (path == 0) mask_color_[0] = value & kColorBits;
             return;
-        case 0xc9:
-            if (path == 1) mask_color_[1] = value & 0x00fcfcfcu;
+        case kRegMaskColorB:
+            if (path == 1) mask_color_[1] = value & kColorBits;
             return;
-        case 0xca:
+        case kRegDyuvAbsStartA:
             if (path == 0) dyuv_abs_start_[0] = value;
             return;
-        case 0xcb:
+        case kRegDyuvAbsStartB:
             if (path == 1) dyuv_abs_start_[1] = value;
             return;
-        case 0xcd:
+        case kRegCursorPosition:
             if (path == 0) cursor_position_ = value;
             return;
-        case 0xce:
+        case kRegCursorControl:
             if (path == 0) cursor_control_ = value;
             return;
-        case 0xcf:
+        case kRegCursorPattern:
             // Row index in bits 16-19.
             if (path == 0) cursor_pattern_[(value >> 16) & 0xf] = uint16_t(value & 0xffffu);
             return;
-        case 0xd8:
+        case kRegBackdropColor:
             if (path == 0) backdrop_color_ = uint8_t(value & 0x0fu);
             return;
-        case 0xd9:
+        case kRegPixelHoldA:
             if (path == 0) pixel_hold_[0] = value;
             return;
-        case 0xda:
+        case kRegPixelHoldB:
             if (path == 1) pixel_hold_[1] = value;
             return;
-        case 0xdb:
+        case kRegWeightFactorA:
             if (path != 0) return;
             weight_factor_[0] = uint8_t(value & 0x3f); // ICF'(5-0), Green Book V.5.9
             invalidate_region_arrays();
             return;
-        case 0xdc:
+        case kRegWeightFactorB:
             if (path != 1) return;
             weight_factor_[1] = uint8_t(value & 0x3f);
             invalidate_region_arrays();
@@ -270,16 +246,6 @@ void Mcd212::set_register(int path, uint8_t reg, uint32_t value) {
 uint32_t Mcd212::vsr_address(int path) const { return join_address(dcr_[path], vsr_[path]); }
 
 void Mcd212::set_vsr_address(int path, uint32_t address) { split_address(dcr_[path], vsr_[path], address); }
-
-// Region Control fields (same_cdi RC_X/RC_WF/RC_RF_BIT/RC_OP).
-namespace {
-constexpr uint32_t kRcX = 0x0003ffu;
-constexpr uint32_t kRcWf = 0x00fc00u;
-constexpr int kRcWfShift = 10;
-constexpr int kRcRfBit = 16;
-constexpr uint32_t kRcOp = 0xf00000u;
-constexpr int kRcOpShift = 20;
-} // namespace
 
 void Mcd212::invalidate_region_arrays() {
     // Rebuilt when next used, with the NR bit as it is now.
@@ -298,23 +264,23 @@ void Mcd212::fill_region_arrays() {
     auto region_op = [&](int idx) -> uint32_t { return (region_control_[idx] & kRcOp) >> kRcOpShift; };
     auto apply_op = [&](uint32_t op, int flag, uint8_t& wfa, uint8_t& wfb, bool* rf, int region_idx) {
         switch (op) {
-            case 4: wfa = region_weight(region_idx); break;
-            case 6: wfb = region_weight(region_idx); break;
-            case 8: rf[flag] = false; break;
-            case 9: rf[flag] = true; break;
-            case 12:
+            case kRcOpWfA: wfa = region_weight(region_idx); break;
+            case kRcOpWfB: wfb = region_weight(region_idx); break;
+            case kRcOpResetRf: rf[flag] = false; break;
+            case kRcOpSetRf: rf[flag] = true; break;
+            case kRcOpWfAResetRf:
                 wfa = region_weight(region_idx);
                 rf[flag] = false;
                 break;
-            case 13:
+            case kRcOpWfASetRf:
                 wfa = region_weight(region_idx);
                 rf[flag] = true;
                 break;
-            case 14:
+            case kRcOpWfBResetRf:
                 wfb = region_weight(region_idx);
                 rf[flag] = false;
                 break;
-            case 15:
+            case kRcOpWfBSetRf:
                 wfb = region_weight(region_idx);
                 rf[flag] = true;
                 break;
@@ -334,7 +300,7 @@ void Mcd212::fill_region_arrays() {
                 for (int region = 0; region < 4; ++region) {
                     int region_idx = (flag << 2) + region;
                     uint32_t op = region_op(region_idx);
-                    if (op == 0) break;
+                    if (op == kRcOpEnd) break;
                     // RC_X is in Double Resolution units (Green Book V.5.10.2).
                     if (uint32_t(x) == (region_control_[region_idx] & kRcX)) {
                         apply_op(op, flag, wfa, wfb, rf, region_idx);
@@ -363,7 +329,7 @@ void Mcd212::fill_region_arrays() {
     for (int region_idx = 0; region_idx < 8; ++region_idx) {
         const uint32_t op = region_op(region_idx);
         const int rc_x = int(region_control_[region_idx] & kRcX);
-        if (op == 0 || rc_x < earliest || rc_x >= kFbWidth) break;
+        if (op == kRcOpEnd || rc_x < earliest || rc_x >= kFbWidth) break;
         fill(filled, rc_x);
         apply_op(op, int((region_control_[region_idx] >> kRcRfBit) & 1u), wfa, wfb, rf, region_idx);
         if (rc_x & 1) region_pairs_uniform_ = false;
@@ -375,66 +341,63 @@ void Mcd212::fill_region_arrays() {
 
 void Mcd212::process_ica(int path, const uint8_t* plane_ram, std::size_t plane_size) {
     // ICA starts at byte 0x400, or 0x404 in even interlaced fields (ica_dca_ctrl.sv, mcd212.sv ica_parity).
-    uint32_t byte_off = (dcr_[0] & kDcr1Sm) && even_field_ ? 0x404u : 0x400u;
-    constexpr int kMaxCommands = 1920; // 3840 16-bit words / 2 words-per-command
-
-    for (int i = 0; i < kMaxCommands; ++i) {
+    uint32_t byte_off = (dcr_[0] & kDcr1Sm) && even_field_ ? kIcaStartEvenField : kIcaStart;
+    for (int i = 0; i < kIcaMaxCommands; ++i) {
         if (byte_off + 4 > plane_size) break;
         uint32_t cmd = read_be32(plane_ram + byte_off);
         uint8_t op = uint8_t(cmd >> 24);
         uint32_t arg = cmd & 0x00ffffffu;
 
-        if (op <= 0x0f) break; // STOP
-        if (op <= 0x1f) {
+        if (op < kCmdNop) break; // STOP
+        if (op < kCmdReloadDcp) {
             byte_off += 4;
             continue;
         } // NOP
-        if (op <= 0x2f) {
+        if (op < kCmdReloadDcpStop) {
             split_address(ddr_[path], dcp_[path], arg & 0x3ffffcu);
             byte_off += 4;
             continue;
         }
-        if (op <= 0x3f) {
+        if (op < kCmdReloadVsr) {
             split_address(ddr_[path], dcp_[path], arg & 0x3ffffcu);
             break;
-        } // RELOAD DCP + STOP
-        if (op <= 0x4f) {
+        }
+        if (op < kCmdReloadVsrStop) {
             byte_off = reload_vsr_jump_target(cmd);
             continue;
-        } // RELOAD VSR: jump only, no register touched
-        if (op <= 0x5f) {
+        } // jump only, no register touched
+        if (op < kCmdInterrupt) {
             set_vsr_address(path, arg);
             break;
-        } // RELOAD VSR + STOP: sets the real register
-        if (op <= 0x6f) {
-            // INTERRUPT: both paths' flags live in CSR2R (as MAME).
+        } // sets the real register
+        if (op < kCmdUndefined) {
+            // Both paths' flags live in CSR2R (as MAME).
             csr2r_ |= (path == 0) ? kCsr2rIt1 : kCsr2rIt2;
             if (!(csrw_[path] & kCsrWDi)) irq1_ = true;
             byte_off += 4;
             continue;
         }
-        if (op >= 0x78 && op <= 0x7f) { // RELOAD DISPLAY PARAMETERS
+        if (op >= kCmdReloadDisplayParams && op < kCmdSetRegister) {
             apply_display_parameters(ddr_[path], dcr_[path], uint8_t(arg & 0x1fu));
             byte_off += 4;
             continue;
         }
-        if (op >= 0x80) {
+        if (op >= kCmdSetRegister) {
             set_register(path, op, arg);
             byte_off += 4;
             continue;
         }
-        byte_off += 4; // 0x70-0x77: unused/undefined
+        byte_off += 4; // kCmdUndefined
     }
 }
 
 void Mcd212::process_dca(int path, const uint8_t* plane_ram, std::size_t plane_size) {
     // DCP can hold 22 bits; same_cdi masks into the installed VRAM.
     uint32_t byte_off = dca_[path] & (uint32_t(plane_size) - 1);
-    constexpr int kBudgetBytes = 64; // real hardware budgets exactly 64 bytes/line
     int consumed = 0;
     bool processing = true;
 
-    while (processing && consumed < kBudgetBytes) {
+    while (processing && consumed < kDcaBudgetBytes) {
         if (byte_off + 4 > plane_size) break;
         uint32_t cmd = read_be32(plane_ram + byte_off);
         uint8_t op = uint8_t(cmd >> 24);
@@ -442,13 +405,13 @@ void Mcd212::process_dca(int path, const uint8_t* plane_ram, std::size_t plane_s
         byte_off += 4;
         consumed += 4; // STOP counts too (same_cdi)
 
-        if (op <= 0x0f) {
+        if (op < kCmdNop) {
             processing = false;
             continue;
         } // STOP
-        if (op <= 0x1f) continue; // NOP
-        if (op <= 0x2f) continue; // RELOAD DCP: meaningless mid-DCA, ignored
-        if (op <= 0x3f) {
+        if (op < kCmdReloadDcp) continue;
+        if (op < kCmdReloadDcpStop) continue; // meaningless mid-DCA, ignored
+        if (op < kCmdReloadVsr) {
             // Jumps DCA at once, skipping the budget advance; narrower mask
             // than DCP's (same_cdi `m_dca = cmd & 0x7fffc; return;`).
             split_address(ddr_[path], dcp_[path], arg & 0x3ffffcu);
@@ -456,54 +419,37 @@ void Mcd212::process_dca(int path, const uint8_t* plane_ram, std::size_t plane_s
             return;
         }
         // In DCA both RELOAD VSR forms set VSR (same_cdi process_dca).
-        if (op <= 0x4f) {
+        if (op < kCmdReloadVsrStop) {
             set_vsr_address(path, arg);
             continue;
-        } // RELOAD VSR
-        if (op <= 0x5f) {
+        }
+        if (op < kCmdInterrupt) {
             set_vsr_address(path, arg);
             processing = false;
             continue;
-        } // RELOAD VSR + STOP
-        if (op <= 0x6f) {
+        }
+        if (op < kCmdUndefined) {
             csr2r_ |= (path == 0) ? kCsr2rIt1 : kCsr2rIt2;
             if (!(csrw_[path] & kCsrWDi)) irq1_ = true;
             continue;
         }
-        if (op >= 0x80) {
+        if (op >= kCmdSetRegister) {
             set_register(path, op, arg);
             continue;
         }
-        if (op >= 0x78) {
+        if (op >= kCmdReloadDisplayParams) {
             apply_display_parameters(ddr_[path], dcr_[path], uint8_t(arg & 0x1fu));
             continue;
-        } // RELOAD DISPLAY PARAMETERS
-        // 0x70-0x77: unused/undefined, no-op
+        }
+        // kCmdUndefined: no-op
     }
 
     // The whole 64-byte budget is consumed wherever STOP fell (same_cdi).
-    byte_off += (kBudgetBytes - consumed);
+    byte_off += (kDcaBudgetBytes - consumed);
     dca_[path] = byte_off;
 }
 
 namespace {
-// same_cdi s_dyuv_deltas.
-constexpr uint8_t kDyuvDeltas[16] = {0, 1, 4, 9, 16, 27, 44, 79, 128, 177, 212, 229, 240, 247, 252, 255};
-
-// Fixed palette for Backdrop Color and CURCNT_COLOR (same_cdi s_4bpp_color).
-constexpr uint32_t k4bppColor[16] = {
-    0x101010, 0x10107a, 0x107a10, 0x107a7a, 0x7a1010, 0x7a107a, 0x7a7a10, 0x7a7a7a,
-    0x101010, 0x1010e6, 0x10e610, 0x10e6e6, 0xe61010, 0xe610e6, 0xe6e610, 0xe6e6e6,
-};
-
-// CURCNT layout per mcd212.sv's cursor_control_register (same_cdi's
-// CURCNT_CON 0x280000 is not contiguous).
-constexpr uint32_t kCurcntBlkc = 0x400000u; // blink type (0=on/off, 1=normal/complementary)
-constexpr uint32_t kCurcntConMask = 0x380000u; // "on" period, in units of 12 frames
-constexpr int kCurcntConShift = 19;
-constexpr uint32_t kCurcntCofMask = 0x070000u; // "off"/complementary period, in units of 12 frames
-constexpr int kCurcntCofShift = 16;
-constexpr int kCursorBlinkSubPeriodFrames = 12; // mcd212.sv CURSOR_BLINK_PERIOD
 
 // same_cdi's m_dyuv_*_to_* tables: each term truncated on its own.
 struct DyuvTerms {
@@ -574,12 +520,12 @@ void Mcd212::decode_dyuv_line(const uint8_t* src, uint32_t* row, uint32_t dyuv_a
 // Entry (byte & mask) | bank (same_cdi BYTE_TO_CLUT<Channel>).
 Mcd212::ClutIndex Mcd212::clut_index(int path, uint8_t icm) const {
     // CM1=1 is RGB555 (Green Book V.4.6.1), handled before this.
-    if (icm == 0x1) return path == 0 ? ClutIndex{.valid = true, .mask = 0xff, .bank = 0x00} : ClutIndex{};
+    if (icm == kIcmClut8) return path == 0 ? ClutIndex{.valid = true, .mask = 0xff, .bank = 0x00} : ClutIndex{};
     // CLUT7: plane B's palette is in banks 2-3, where its bank register points.
-    if (icm == 0x3) return {.valid = true, .mask = 0x7f, .bank = uint8_t(path == 1 ? 0x80 : 0x00)};
+    if (icm == kIcmClut7) return {.valid = true, .mask = 0x7f, .bank = uint8_t(path == 1 ? kClutPlaneB : 0x00)};
     // Plane A's dual CLUT7, CS picks the half; plane B's CM1=4 is reserved.
-    if (icm == 0x4) {
-        return path == 0 ? ClutIndex{.valid = true, .mask = 0x7f, .bank = uint8_t(icm_cs_ ? 0x80 : 0x00)}
+    if (icm == kIcmClut77) {
+        return path == 0 ? ClutIndex{.valid = true, .mask = 0x7f, .bank = uint8_t(icm_cs_ ? kClutPlaneB : 0x00)}
                          : ClutIndex{.valid = true, .mask = 0x00, .bank = 0x00};
     }
     return {}; // reserved (CLUT4 is decoded elsewhere)
@@ -593,34 +539,35 @@ uint32_t Mcd212::clut_pixel(int path, uint8_t byte, uint8_t icm) const {
     return clut_color(clut_index(path, icm), byte);
 }
 
-// same_cdi TCR_COND_*; codes 8-15 invert 0-7 (De Morgan covers 13/14).
+// De Morgan covers the inverted RF || Key conditions (13/14).
 Mcd212::TransparencyRule Mcd212::transparency_rule(int path) const {
-    const uint32_t field = transparency_control_ >> (path == 0 ? 0 : 8);
+    const uint32_t field = transparency_control_ >> (path == 0 ? 0 : kTcrPlaneBShift);
     TransparencyRule rule;
-    switch (field & 0x07) {
-        case 0x0: rule.always = true; break; // Always
-        case 0x1: rule.color_key = true; break; // Color Key
-        case 0x3: rule.flag = 0; break; // RF0
-        case 0x4: rule.flag = 1; break; // RF1
-        case 0x5:
+    switch (field & kTcrCondition) {
+        case kTcrAlways: rule.always = true; break;
+        case kTcrKey: rule.color_key = true; break;
+        case kTcrRf0: rule.flag = 0; break;
+        case kTcrRf1: rule.flag = 1; break;
+        case kTcrRf0Key:
             rule.flag = 0;
             rule.color_key = true;
-            break; // RF0 || Key
-        case 0x6:
+            break;
+        case kTcrRf1Key:
             rule.flag = 1;
             rule.color_key = true;
-            break; // RF1 || Key
-        default: break; // 2 (RGB555 T bit), 7 (unused): never matches
+            break;
+        default: break; // kTcrRgb, 7 (unused): never matches
     }
-    rule.invert = (field & 0x08) != 0;
+    rule.invert = (field & kTcrInvert) != 0;
     // Color Key is for CLUT planes only, bits 2-7, Mask Color bits don't-care
     // (Green Book V.5.7.2.2; mcd212.sv gates it on !plane_dyuv_active).
-    const bool clut_coded = icm_[path] == 0x1 || icm_[path] == 0x3 || icm_[path] == 0x4 || icm_[path] == kIcmClut4;
+    const bool clut_coded =
+        icm_[path] == kIcmClut8 || icm_[path] == kIcmClut7 || icm_[path] == kIcmClut77 || icm_[path] == kIcmClut4;
     rule.color_key = rule.color_key && clut_coded;
     rule.key = transparent_color_[path];
-    rule.compared_bits = ~mask_color_[path] & 0x00fcfcfcu;
+    rule.compared_bits = ~mask_color_[path] & kColorBits;
     // Inverted Color Key on DYUV is undefined; mcd212.sv's "Jeopardy hack" keeps the plane visible.
-    if ((field & 0x0f) == 0x9 && icm_[path] == kIcmDyuv) rule.invert = false;
+    if ((field & kTcrField) == kTcrNotKey && icm_[path] == kIcmDyuv) rule.invert = false;
     return rule;
 }
 
@@ -636,24 +583,24 @@ bool Mcd212::plane_transparent(int path, uint32_t color, int x) const {
 
 bool Mcd212::rgb555_transparent(int x, bool transparency_bit) const {
     // RGB555 is plane B only (V.4.6.1): TB, with the T bit instead of Color Key.
-    uint8_t field = uint8_t(transparency_control_ >> 8) & 0x0f;
+    uint8_t field = uint8_t(transparency_control_ >> kTcrPlaneBShift) & kTcrField;
     bool matches;
-    switch (field & 0x07) {
-        case 0x0: matches = true; break; // Always
-        case 0x1: matches = false; break; // Color Key: unavailable for RGB555
-        case 0x2: matches = transparency_bit; break; // T bit
-        case 0x3: matches = region_flag_line_[0][x]; break; // RF0
-        case 0x4: matches = region_flag_line_[1][x]; break; // RF1
-        case 0x5: matches = region_flag_line_[0][x]; break; // RF0 || Color Key
-        case 0x6: matches = region_flag_line_[1][x]; break; // RF1 || Color Key
+    switch (field & kTcrCondition) {
+        case kTcrAlways: matches = true; break;
+        case kTcrKey: matches = false; break; // unavailable for RGB555
+        case kTcrRgb: matches = transparency_bit; break;
+        case kTcrRf0: matches = region_flag_line_[0][x]; break;
+        case kTcrRf1: matches = region_flag_line_[1][x]; break;
+        case kTcrRf0Key: matches = region_flag_line_[0][x]; break;
+        case kTcrRf1Key: matches = region_flag_line_[1][x]; break;
         default: matches = false; break; // reserved
     }
-    return matches != ((field & 0x08) != 0);
+    return matches != ((field & kTcrInvert) != 0);
 }
 
 void Mcd212::apply_pixel_hold(int path, uint32_t* row, bool* opaque, int width) const {
     const uint32_t control = pixel_hold_[path & 1];
-    if ((control & 0x800000u) == 0) return;
+    if ((control & kPixelHoldEnable) == 0) return;
     const int factor = int(control & 0xffu);
     // 0 is reserved (Green Book V.5.11.1.1); treat it as off, not a whole-line latch.
     if (factor <= 1) return;
@@ -714,8 +661,8 @@ void Mcd212::render_line_rgb555(uint32_t* row, bool* t_bit, const uint8_t* plane
     const uint32_t addr_b = vsr_address(1);
 
     // Pixel Repeat (V.5.11.1.2) from plane B's DDR, the same for both stores.
-    const uint8_t rms_b = uint8_t((ddr_[1] >> 8) & 0x3);
-    const int repeat_factor = rms_b == 0x3 ? pixel_repeat(ddr_[1]) : 1;
+    const uint8_t rms_b = uint8_t((ddr_[1] >> kDdrFtShift) & 0x3);
+    const int repeat_factor = rms_b == kDdrFtMosaic ? pixel_repeat(ddr_[1]) : 1;
     uint8_t upper_codes[kLineWidth], lower_codes[kLineWidth];
     fetch_codes(upper_codes, kLineWidth, plane_a, addr_a, mask, repeat_factor);
     fetch_codes(lower_codes, kLineWidth, plane_b, addr_b, mask, repeat_factor);
@@ -735,7 +682,7 @@ void Mcd212::render_line_rgb555(uint32_t* row, bool* t_bit, const uint8_t* plane
 
 // No pixels this line: coding OFF or VSR 0 (all 22 bits).
 bool Mcd212::plane_parked(int path) const {
-    return !(dcr_[path] & kDcrIc) || icm_[path] == 0 || vsr_address(path) == 0;
+    return !(dcr_[path] & kDcrIc) || icm_[path] == kIcmOff || vsr_address(path) == 0;
 }
 
 void Mcd212::decode_plane_line(int path, const uint8_t* plane_ram, std::size_t plane_size, uint32_t* row,
@@ -754,9 +701,9 @@ void Mcd212::decode_plane_line(int path, const uint8_t* plane_ram, std::size_t p
 
     std::size_t mask = plane_size - 1;
 
-    // DDR file type (bits 8-9): 2 = RLE, 3 = Pixel Repeat, else bitmap.
-    const uint8_t rms = uint8_t((ddr >> 8) & 0x3);
-    if (rms == 0x2) {
+    // Neither RLE nor Pixel Repeat: bitmap.
+    const uint8_t rms = uint8_t((ddr >> kDdrFtShift) & 0x3);
+    if (rms == kDdrFtRle) {
         render_line_rle(path, row, present, plane_ram, mask);
         return;
     }
@@ -764,7 +711,7 @@ void Mcd212::decode_plane_line(int path, const uint8_t* plane_ram, std::size_t p
     const uint32_t byte_off = vsr_address(path);
     uint8_t line_bytes[kLineWidth];
     // Pixel Repeat repeats codes, not decoded RGB, and not for DYUV (V.5.11.1.2).
-    const bool repeat = rms == 0x3 && icm != kIcmDyuv && icm != kIcmClut4;
+    const bool repeat = rms == kDdrFtMosaic && icm != kIcmDyuv && icm != kIcmClut4;
     const int repeat_factor = repeat ? pixel_repeat(ddr) : 1;
     fetch_codes(line_bytes, kLineWidth, plane_ram, byte_off, mask, repeat_factor);
     if (icm == kIcmDyuv) {
@@ -789,7 +736,7 @@ uint32_t Mcd212::composite_pixel(uint32_t color_a, bool opaque_a, uint32_t color
         return d >= 0 ? (d + 31) / 63 : -((31 - d) / 63);
     };
 
-    bool mix_enabled = (transparency_control_ & 0x800000u) == 0;
+    bool mix_enabled = (transparency_control_ & kTcrDisableMx) == 0;
     if (mix_enabled && (opaque_a || opaque_b)) {
         // C(A)+C(B)-16: one +16 pedestal for the sum (V.5.9.1); a
         // transparent plane counts as black, whatever it decoded to.
@@ -808,7 +755,7 @@ uint32_t Mcd212::composite_pixel(uint32_t color_a, bool opaque_a, uint32_t color
 
     // Mix disabled: front plane, else back plane, each with its own weight,
     // else backdrop. Mixing with neither plane present shows the backdrop too (mcd212.sv).
-    bool b_in_front = (plane_order_ & 0x01) != 0;
+    bool b_in_front = (plane_order_ & kPorBa) != 0;
     uint32_t front_color = b_in_front ? color_b : color_a;
     bool front_opaque = b_in_front ? opaque_b : opaque_a;
     uint32_t back_color = b_in_front ? color_a : color_b;
@@ -855,7 +802,7 @@ void Mcd212::render_line(int line, const uint8_t* plane_a, const uint8_t* plane_
     uint32_t row_a[kFbWidth], row_b[kFbWidth];
 
     // RGB555: plane A Off, CM1 = 1, composited as plane B (V.4.4.8/V.4.6.1).
-    if (icm_[0] == 0x0 && icm_[1] == 0x1) {
+    if (icm_[0] == kIcmOff && icm_[1] == kIcmRgb555) {
         uint32_t lores[kLineWidth];
         bool t_bit[kLineWidth];
         render_line_rgb555(lores, t_bit, plane_a, plane_b, plane_size);
@@ -947,8 +894,8 @@ void Mcd212::decode_double_res_line(int path, const uint8_t* plane_ram, std::siz
     }
     uint32_t vsr = vsr_address(path);
     const std::size_t mask = plane_size - 1;
-    const uint8_t rms = uint8_t((ddr >> 8) & 0x3);
-    const bool run_length = rms == 0x2;
+    const uint8_t rms = uint8_t((ddr >> kDdrFtShift) & 0x3);
+    const bool run_length = rms == kDdrFtRle;
     // One byte per active Normal Resolution pixel.
     uint8_t codes[kLineWidth] = {};
     const int units = active_width_;
@@ -968,11 +915,11 @@ void Mcd212::decode_double_res_line(int path, const uint8_t* plane_ram, std::siz
             }
         }
     } else {
-        const int repeat_factor = rms == 0x3 ? pixel_repeat(ddr) : 1;
+        const int repeat_factor = rms == kDdrFtMosaic ? pixel_repeat(ddr) : 1;
         fetch_codes(codes, units, plane_ram, vsr, mask, repeat_factor);
         vsr += uint32_t(units / repeat_factor);
     }
-    const uint8_t bank = path == 1 ? 0x80 : 0x00;
+    const uint8_t bank = path == 1 ? kClutPlaneB : 0x00;
     const uint8_t pixel_mask = run_length ? 0x7 : 0xf;
     for (int x = 0; x < kLineWidth; ++x) {
         if (x >= units) {
@@ -1018,16 +965,15 @@ void Mcd212::update_cursor_blink() {
 
 // X is a Double Resolution column, Y a line, both from the active area's origin.
 void Mcd212::draw_cursor() {
-    if (!(cursor_control_ & 0x800000u)) return; // CURCNT_EN
+    if (!(cursor_control_ & kCurcntEn)) return;
     // Off phase: BLKC 0 hides the cursor, BLKC 1 complements its colour.
     if (cursor_blink_state_ && !(cursor_control_ & kCurcntBlkc)) return;
     int cursor_x = int(cursor_position_ & 0x3ffu);
     int cursor_y = int((cursor_position_ >> 12) & 0x3ffu);
-    uint32_t color_index = cursor_control_ & 0xfu; // CURCNT_COLOR
+    uint32_t color_index = cursor_control_ & kCurcntColor;
     if (cursor_blink_state_) color_index ^= 0x7u; // complementary: flip R/G/B, keep Y
     uint32_t color = k4bppColor[color_index];
-    // CURCNT_CUW: one Double Resolution pixel per pattern bit, else two.
-    int px_per_bit = (cursor_control_ & 0x8000u) ? 1 : 2;
+    int px_per_bit = (cursor_control_ & kCurcntCuw) ? 1 : 2;
     int width = 16 * px_per_bit;
 
     for (int row = 0; row < 16; ++row) {
@@ -1089,6 +1035,8 @@ int Mcd212::begin_field(int lines) {
     weaving_ = even_field_ || (dcr_[0] & kDcr1Sm);
     vertical_blank_started_ = false;
     const bool fd = (dcr_[0] & kDcr1Fd) != 0, st = (csrw_[0] & kCsr1wSt) != 0;
+    // Datasheet tables 5-4/5-6, video_timing.sv: 240 lines with FD or ST, else 280;
+    // 384 pixels with CF and not ST, else 360.
     active_height_ = (fd || st) ? 240 : kFbHeight;
     active_width_ = ((dcr_[0] & kDcr1Cf) && !st) ? kLineWidth : 360;
     display_aspect_ = tv_display_aspect(active_width_, active_height_, dcr_[0] & kDcr1Cf, fd);

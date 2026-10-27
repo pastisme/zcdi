@@ -9,6 +9,184 @@
 namespace zcdi {
 namespace mamecdi {
 
+// VMPEG (DVC cartridge) register values and the MPEG-1 system stream syntax it parses.
+namespace vmpeg {
+
+// Register word indices, vmpeg.sv `address[15:1]` (byte address 0xe00000 + 2 * index).
+enum Register : uint32_t {
+    kFmaCmd = 0x1800, // 0xe03000
+    kFmaStatus = 0x1801, // 0xe03002
+    kFmaStreamW = 0x1804, // 0xe03008 (write: wanted stream)
+    kFmaStreamR = 0x1805, // 0xe0300a (read: current stream, same reg here)
+    kFmaIvec = 0x1806, // 0xe0300c
+    kFmaDclkH = 0x1808, // 0xe03010
+    kFmaDclkL = 0x1809, // 0xe03012
+    kFmaAudioHdrH = 0x180a, // 0xe03014
+    kFmaAudioHdrL = 0x180b, // 0xe03016
+    kFmaRun = 0x180c, // 0xe03018
+    kFmaIsr = 0x180d, // 0xe0301a
+    kFmaIer = 0x180e, // 0xe0301c
+    kFmaDspa = 0x1811, // 0xe03022
+    kFmaDspd = 0x1812, // 0xe03024
+
+    kFmvImageWidth = 0x2001, // 0xe04002
+    kFmvImageHeight = 0x2002, // 0xe04004
+    kFmvImageRt = 0x2003, // 0xe04006
+    kFmvTimecodeHiA = 0x2004, // 0xe04008
+    kFmvTimecodeLoA = 0x2005, // 0xe0400a (vmpeg.sv comment says 0xe0400c)
+    kFmvDisplayW = 0x2029, // 0xe04052
+    kFmvDisplayH = 0x202a, // 0xe04054
+    kFmvPicRt = 0x202b, // 0xe04056
+    kFmvTimecodeHiB = 0x202c, // 0xe04058
+    kFmvTimecodeLoB = 0x202d, // 0xe0405a
+    kFmvTempref = 0x202e, // 0xe0405c
+    kFmvSysSts = 0x202f, // 0xe0405e
+    kFmvIer = 0x2030, // 0xe04060
+    kFmvIsr = 0x2031, // 0xe04062
+    kFmvTcnt = 0x2032, // 0xe04064
+    kFmvTrld = 0x2057, // 0xe040ae (write-only reload)
+    kFmvVoff = 0x2036, // 0xe0406c
+    kFmvHoff = 0x2037, // 0xe0406e
+    kFmvVpix = 0x2038, // 0xe04070
+    kFmvHpix = 0x2039, // 0xe04072
+    kFmvScrposY = 0x203a, // 0xe04074
+    kFmvScrposX = 0x203b, // 0xe04076
+    kFmvDecwinH = 0x203c, // 0xe04078
+    kFmvDecwinW = 0x203d, // 0xe0407a
+    kFmvDecoffY = 0x203e, // 0xe0407c
+    kFmvDecoffX = 0x203f, // 0xe0407e
+    kFmvGenDecCmd = 0x2044, // 0xe04088
+    kFmvGenVdiCmd = 0x2046, // 0xe0408c
+    kFmvGenSyscr = 0x204c, // 0xe04098
+    kFmvGenSyncDiff = 0x204e, // 0xe0409c
+    kFmvGenDecDelay = 0x204f, // 0xe0409e
+    kFmvDts = 0x2050, // 0xe040a0
+    kFmvPicsInFifo = 0x2052, // 0xe040a4
+    kFmvPicRate = 0x2054, // 0xe040a8
+    kFmvDisplayRate = 0x2055, // 0xe040aa
+    kFmvFrameRate = 0x2056, // 0xe040ac
+    kFmvSyscmd = 0x2060, // 0xe040c0
+    kFmvVidcmd = 0x2061, // 0xe040c2
+    kFmvStreamNum = 0x2062, // 0xe040c4
+    kFmvSysScr = 0x2063, // 0xe040c6
+    kFmvXfer = 0x206f, // 0xe040de
+    kFmvIvec = 0x206e, // 0xe040dc
+    kFmvMmuBase = 0x2073, // 0xe040e6
+};
+
+// FMA_CMD.
+enum FmaCommand : uint16_t {
+    kFmaCmdStop = 0x0001,
+    kFmaCmdStartDma = 0x8000, // to audio
+};
+
+// FMA status, low byte.
+enum FmaStatus : uint8_t {
+    kFmaStatusFinished = 0x01,
+    kFmaStatusFrame = 0x04,
+    kFmaStatusUnderflow = 0x08,
+    kFmaStatusDecoding = 0x10,
+};
+
+// fma_interrupt_status_register bits, vmpeg.sv:703-758.
+enum FmaInterruptBit : uint16_t {
+    kFmaIntIsoEnd = 1u << 0,
+    kFmaIntCsu = 1u << 1, // stream change
+    kFmaIntFrame = 1u << 2, // frame header updated
+    kFmaIntUnf = 1u << 3, // underflow
+    kFmaIntDecoding = 1u << 4, // decoding started
+    kFmaIntTim = 1u << 8,
+};
+
+// FMA DSP (dsp_registers.sv): DSPA 0/1 select mode and target; with these,
+// four DSPA 7 writes set the volumes in dB.
+constexpr uint8_t kDspModeVolume = 0x80; // DSPD written at DSPA 0
+constexpr uint8_t kDspTargetVolume = 0x93; // DSPD written at DSPA 1
+constexpr uint8_t kDspaVolume = 7;
+
+// FMV interrupt_flags_s, vmpeg.sv:243-263.
+enum InterruptBit : uint16_t {
+    kIntSeq = 1u << 0,
+    kIntGop = 1u << 1,
+    kIntPic = 1u << 2,
+    kIntEod = 1u << 3,
+    kIntRfb = 1u << 4,
+    kIntNdat = 1u << 5,
+    kIntOvf = 1u << 6,
+    kIntDcl = 1u << 7,
+    kIntTim = 1u << 8,
+    kIntEsi = 1u << 9,
+    kIntEii = 1u << 10,
+    kIntVsync = 1u << 11,
+    kIntPai = 1u << 12,
+    kIntVcup = 1u << 13,
+    kIntErdd = 1u << 14,
+    kIntErdv = 1u << 15,
+};
+
+// FMV_SYSCMD (vmpeg.sv:836-949).
+enum SysCmd : uint16_t {
+    kSysCmdSlowMotion = 0x0007, // period x (n + 1)
+    kSysCmdPlay = 0x0008,
+    kSysCmdPause = 0x0010,
+    kSysCmdContinue = 0x0020,
+    kSysCmdStep = 0x0040,
+    kSysCmdStop = 0x0080,
+    kSysCmdClearFifo = 0x0100,
+    kSysCmdDecoderOn = 0x1000,
+    kSysCmdDecoderOff = 0x2000,
+    kSysCmdStartDma = 0x8000, // to video
+};
+
+// FMV_VIDCMD (vmpeg.sv:950-981).
+enum VidCmd : uint16_t {
+    kVidCmdScroll = 0x0004, // RegsUpd at the next vsync, not the next picture
+    kVidCmdRegsUpd = 0x0008,
+    kVidCmdHide = 0x0100,
+    kVidCmdShow = 0x0200,
+    kVidCmdShowOnChange = 0x0400,
+};
+
+constexpr uint16_t kSysScrSynchronous = 0x0004; // SYSSCR: display follows the DTS
+constexpr uint16_t kSysStsFifoNotFull = 0x2000;
+constexpr uint16_t kVdiTimestampUpdated = 0x4000; // GEN_VDI_CMD bit 14 (vmpeg.sv:660)
+// mpeg_video.sv fifo_full: input FIFO level over this many bytes.
+constexpr uint32_t kFmvInputFifoFullBytes = 28000;
+
+// GEN_DISPLAY_RATE (vmpeg.sv kDisplayRate_PAL/NTSC).
+enum DisplayRate : uint16_t {
+    kDisplayRateNtsc = 0x05dc,
+    kDisplayRatePal = 0x0708,
+};
+
+// vmpeg.sv:742-747: MPEG RAM is enabled for good on the 64th register write.
+constexpr int kMpegRamEnableWrites = 64;
+
+// MPEG-1 start codes (ISO 11172), each after the 00 00 01 prefix.
+constexpr uint32_t kStartCodePrefix = 0x00000100;
+constexpr uint32_t kStartCodePrefixMask = 0xffffff00;
+enum StartCode : uint8_t {
+    kPictureStart = 0x00,
+    kSequenceHeader = 0xb3,
+    kProgramEnd = 0xb9, // ISO 11172 end code
+    kPackStart = 0xba,
+    kSystemHeader = 0xbb, // this and above carry a 16-bit length
+    kAudioStream = 0xc0, // + stream number
+    kVideoStream = 0xe0, // + stream number
+};
+
+// PES header bytes before the payload (ISO 11172-1 2.4.3.3).
+enum PesHeader : uint8_t {
+    kPesHasDts = 0x10,
+    kPesPts = 0x20, // 0010 PTS or 0011 PTS + DTS
+    kPesStdBuffer = 0x40, // P-STD buffer size, 2 bytes
+    kPesStdBufferMask = 0xc0,
+    kPesPtsMask = 0xe0,
+    kPesStuffing = 0xff,
+};
+
+} // namespace vmpeg
+
 // One mpeg_demuxer.sv: MPEG-1 pack and PES parsing for one channel. The
 // channels handle start codes themselves (scan(), then begin()).
 struct PsDemux {
@@ -141,9 +319,9 @@ struct VmpegSaveState {
 
     // Host interface: DMA routing, XFER FIFOs, MPEG RAM enable, pending resets.
     bool vcd_pixel_clock_ = false; // write-only register, 0xe01xxx
-    int mpeg_ram_enabled_cnt_ = 0; // register writes, saturating; enabled at 64
+    int mpeg_ram_enabled_cnt_ = 0; // register writes, saturating at vmpeg::kMpegRamEnableWrites
 
-    // Routes DMA and FMV_XFER bytes: set by FMA_CMD 0x8002, cleared by FMV_SYSCMD 0x8000.
+    // Routes DMA and FMV_XFER bytes: set by vmpeg::kFmaCmdStartDma, cleared by kSysCmdStartDma.
     bool dma_for_fma_ = false;
     bool clear_fifo_pending_ = false;
     bool decoder_off_pending_ = false;
@@ -199,7 +377,7 @@ public:
     void set_audio_decoding_started();
     // FMA status "decoding": set by the playback timer or, for audio
     // without timestamps, the first decoded samples.
-    bool audio_dsp_enabled() const { return (fma_status_register_ & kFmaStatusDecoding) != 0; }
+    bool audio_dsp_enabled() const { return (fma_status_register_ & vmpeg::kFmaStatusDecoding) != 0; }
     // PS audio waiting for the playback timer to reach its first PTS.
     bool audio_start_pending() const { return fma_ps_seen_ && !audio_dsp_enabled(); }
     void set_audio_frame_decoded(uint32_t header);
@@ -238,7 +416,7 @@ public:
     };
     DisplayWindow display_window() const;
 
-    bool mpeg_ram_enabled() const { return mpeg_ram_enabled_cnt_ >= kMpegRamEnableWrites; }
+    bool mpeg_ram_enabled() const { return mpeg_ram_enabled_cnt_ >= vmpeg::kMpegRamEnableWrites; }
 
     // Q0.8 gains (256 = unity); unconfigured means apply no gain.
     uint8_t mpeg_volume_l2l() const { return mpeg_volume_l2l_; }
@@ -252,7 +430,7 @@ public:
     std::vector<uint8_t> drain_fmv_es_bytes();
     std::vector<uint8_t> drain_fma_es_bytes();
 
-    // One-shot: 0xB9 demuxed on the FMV channel (EII is already raised).
+    // One-shot: vmpeg::kProgramEnd demuxed on the FMV channel (EII is already raised).
     bool consume_fmv_program_end() { return std::exchange(fmv_program_end_pending_, false); }
 
     void feed_dma_word(uint16_t word);
@@ -266,42 +444,10 @@ public:
     // FMA_CMD stop: reset the MPEG audio decoder (vmpeg.sv:852).
     bool consume_audio_reset() { return std::exchange(audio_reset_pending_, false); }
 
-    // Leaves FMV_SYSCMD bit 15 set, as the RTL does (vmpeg.sv:711-714).
+    // Leaves kSysCmdStartDma set, as the RTL does (vmpeg.sv:711-714).
     void complete_dma();
 
 private:
-    // interrupt_flags_s, vmpeg.sv:243-263.
-    enum InterruptBit : uint16_t {
-        kIntErdv = 1u << 15,
-        kIntErdd = 1u << 14,
-        kIntVcup = 1u << 13,
-        kIntPai = 1u << 12,
-        kIntVsync = 1u << 11,
-        kIntEii = 1u << 10,
-        kIntEsi = 1u << 9,
-        kIntTim = 1u << 8,
-        kIntDcl = 1u << 7,
-        kIntOvf = 1u << 6,
-        kIntNdat = 1u << 5,
-        kIntRfb = 1u << 4,
-        kIntEod = 1u << 3,
-        kIntPic = 1u << 2,
-        kIntGop = 1u << 1,
-        kIntSeq = 1u << 0,
-    };
-    // fma_interrupt_status_register bits, vmpeg.sv:703-758.
-    enum FmaInterruptBit : uint16_t {
-        kFmaIntTim = 1u << 8,
-        kFmaIntDecoding = 1u << 4, // decoding started
-        kFmaIntUnf = 1u << 3, // underflow
-        kFmaIntFrame = 1u << 2, // frame header updated
-        kFmaIntCsu = 1u << 1, // stream change
-        kFmaIntIsoEnd = 1u << 0,
-    };
-    static constexpr uint8_t kFmaStatusDecoding = 0x10;
-    // vmpeg.sv:742-747: MPEG RAM is enabled for good on the 64th register write.
-    static constexpr int kMpegRamEnableWrites = 64;
-
     uint16_t read_word(uint32_t word_index) const;
     // Side effects run only when `completing` (the low byte of a 16-bit write).
     void write_word(uint32_t word_index, uint16_t value, bool completing);

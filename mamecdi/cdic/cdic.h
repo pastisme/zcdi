@@ -9,6 +9,82 @@
 namespace zcdi {
 namespace mamecdi {
 
+// Register values, as CdicSaveState and CDIC RAM hold them (names after same_cdi).
+namespace cdic {
+
+// Register byte offsets from 0x303c00 (high byte first).
+enum RegisterOffset : uint32_t {
+    kRegCommand = 0x000,
+    kRegTime = 0x002, // 4 bytes
+    kRegFile = 0x006,
+    kRegChannel = 0x008, // 4 bytes
+    kRegAudioChannel = 0x00c,
+    kRegAbuf = 0x3f4,
+    kRegXbuf = 0x3f6,
+    kRegDmaControl = 0x3f8, // write-only
+    kRegAudctl = 0x3fa,
+    kRegInterruptVector = 0x3fc,
+    kRegDbuf = 0x3fe,
+};
+
+// Command register, low byte (same_cdi handle_cdic_command).
+enum Command : uint8_t {
+    kCmdIdle = 0x00, // as disc_command_ only
+    kCmdResetMode1 = 0x23,
+    kCmdResetMode2 = 0x24,
+    kCmdFetchToc = 0x27,
+    kCmdPlayCdda = 0x28,
+    kCmdReadMode1 = 0x29,
+    kCmdReadMode2 = 0x2a,
+    kCmdStopCdda = 0x2b,
+    kCmdSeek = 0x2c,
+    kCmdUpdate = 0x2e,
+};
+
+// ABUF/XBUF: a buffer is ready; reading the high byte clears it.
+constexpr uint16_t kBufReady = 0x8000;
+
+// DBUF.
+enum Dbuf : uint16_t {
+    kDbufBank0 = 0x0000,
+    kDbufBank1 = 0x0001,
+    kDbufAudio = 0x0004, // the sector's audio went to the audio bank
+    kDbufActive = 0x4000, // clear: stop reading
+    kDbufTrigger = 0x8000, // write: run the command register
+};
+
+// AUDCTL (cdic.sv).
+enum Audctl : uint16_t {
+    kAudctlStoppedOnEnd = 0x0001, // the player met kAudioMapEnd; cleared by reading
+    kAudctlRun = 0x0800,
+    kAudctlAbufIrq = 0x2000,
+};
+
+// CDIC RAM, byte addresses.
+enum RamLayout : uint32_t {
+    kDataBank0 = 0x0000,
+    kDataBank1 = 0x0a00,
+    kCddaBank0 = 0x1400, // cdic.sv read_raw: words 0x0a00/0x0f00
+    kCddaBank1 = 0x1e00,
+    kAudioMap0 = 0x2800,
+    kAudioMap1 = 0x3200,
+};
+// A data bank holds the sector from its header on, split at FILE2 (same_cdi
+// SECTOR_FILE2) where Mode 2 audio skips to the audio bank, then the Q subcode
+// one byte per word.
+constexpr uint32_t kFile2Offset = 20;
+constexpr uint32_t kSubqOffset = (kFile2Offset - kSyncSize) + (kRawSectorSize - kFile2Offset);
+constexpr uint32_t kAudioBankSkipBytes = 0x1400u * 2; // 0x1400 RAM words
+
+// An audio map buffer: the coding byte (kAudioMapEnd stops the player), then the data.
+enum AudioMapLayout : uint32_t {
+    kAudioMapCoding = 11,
+    kAudioMapData = 12,
+};
+constexpr uint8_t kAudioMapEnd = 0xff;
+
+} // namespace cdic
+
 struct CdicSaveState {
     static constexpr uint32_t kRamSize = 0x4000;
     std::array<uint8_t, kRamSize> ram_ = {};
@@ -20,12 +96,11 @@ struct CdicSaveState {
     // Reset default is all channels selected (same_cdi device_reset).
     uint32_t channel_ = 0xffffffffu; // 32-bit channel bitmask
     uint16_t audio_channel_ = 0xffffu;
-    uint16_t audio_buffer_ = 0; // ABUF, bit15 = audio-ready
-    uint16_t x_buffer_ = 0; // XBUF, bit15 = sector-ready
-    uint16_t audio_control_ = 0; // AUDCTL
+    uint16_t audio_buffer_ = 0; // ABUF, cdic::kBufReady = audio-ready
+    uint16_t x_buffer_ = 0; // XBUF, cdic::kBufReady = sector-ready
+    uint16_t audio_control_ = 0; // cdic::Audctl
     uint16_t interrupt_vector_ = 0x0f;
-    uint16_t data_buffer_ = 0; // bit15=trigger(write-only-effect) bit14=active bits0,2=bank select (bit2 set only for a
-                               // Mode2-audio-selected sector)
+    uint16_t data_buffer_ = 0; // cdic::Dbuf
     uint16_t dma_control_ = 0; // low 14 bits = starting word offset into CDIC RAM for a DMA transfer
 
     // cdic.sv data_target_buffer/audio_target_buffer: not part of DBUF, a
@@ -36,7 +111,7 @@ struct CdicSaveState {
     bool irq4_ = false;
 
     // --- disc-read state machine ---
-    uint8_t disc_command_ = 0; // 0 = idle
+    uint8_t disc_command_ = 0; // cdic::Command, kCmdIdle = none
     int curr_lba_ = 0;
     int spinup_counter_ = 0;
     int sector_cycle_accum_ = 0; // fractional cycles carried between tick_cycles calls
@@ -47,8 +122,8 @@ struct CdicSaveState {
     int read_fail_streak_ = 0;
 
     // --- ADPCM player, paced by its own 75 Hz timer ---
-    uint16_t decode_addr_ = 0xffff; // next buffer to play
-    bool decoding_audio_map_ = false; // running (AUDCTL bit 11 as the player sees it)
+    uint16_t decode_addr_ = 0xffff; // next buffer to play: cdic::RamLayout, 0xffff = none yet
+    bool decoding_audio_map_ = false; // running (kAudctlRun as the player sees it)
     bool cdda_mode_ = false; // set by executing Play CDDA, cleared by any other command
     int audio_sector_counter_ = 0; // 75Hz ticks left of the buffer playing
     int audio_format_sectors_ = 0; // length of the buffer playing in ticks; 0 = none playing
@@ -91,7 +166,7 @@ public:
     int iack_vector() const { return interrupt_vector_ & 0xff; }
 
     // True while Fetch TOC, Play CDDA, Read or Seek is running.
-    bool disc_active() const { return disc_command_ != 0; }
+    bool disc_active() const { return disc_command_ != cdic::kCmdIdle; }
 
     // Low 14 bits: start word in CDIC RAM for Bus::perform_cdic_dma.
     uint16_t dma_control() const { return dma_control_; }

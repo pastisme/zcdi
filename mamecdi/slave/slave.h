@@ -25,9 +25,99 @@ enum class FrontDeviceType : uint8_t {
 // Driven by 0xfc/0xfd (0x47b, 0x9bb); the back socket's RTS.
 enum class Pc6 : uint8_t { kReleased, kHigh, kLow };
 
-struct SlaveSaveState {
-    static constexpr int kNumChannels = 4;
+// SLAVE and SERVO protocol values (cdichips mc6805slave.md, SLAVE 2.0 / SERVO 2.1 firmware).
+namespace slave {
 
+// Channels A-D; kChannelControl also carries kChannelStatus's replies.
+enum ChannelId : int { kChannelPointer, kChannelLcd, kChannelControl, kChannelStatus, kNumChannels };
+
+// Servo tray states ($99, firmware 0x1ac3): 2-4 closing, 6-9 opening.
+enum TrayState : uint8_t {
+    kTrayOpen = 1,
+    kTrayClosing = 2,
+    kTrayClosed = 5,
+    kTrayOpening = 6,
+};
+
+// Master volume ($d6): attenuation in dB plus the running ramp's direction.
+enum MasterVolume : uint8_t {
+    kMasterDb = 0x3f,
+    kMasterRampLouder = 0x40,
+    kMasterRampSofter = 0x80,
+    kMasterRamp = 0xc0,
+};
+
+// Channel 0 (0x3b6): 0x80-0xbf decode on their low nibble.
+enum PointerCommand : uint8_t {
+    kPtrEnable = 0x03, // 0x83
+    kPtrDisable = 0x04, // 0x84
+    kPtrSetPosition = 0xc0, // 0xc0-0xff, 3 bytes
+};
+
+// Channel 2 (firmware 0x48d).
+enum ControlCommand : uint8_t {
+    kCtlMute = 0x82,
+    kCtlUnmute = 0x83,
+    kCtlUnmutePc7 = 0x84, // also sets port C bit 7, which drives nothing audible
+    kCtlMasterLouder = 0x85,
+    kCtlMasterSofter = 0x86,
+    kCtlMasterStop = 0x87,
+    kCtlMasterToggle = 0x88,
+    kCtlTrayOpen = 0x89,
+    kCtlResetCpu = 0x8a,
+    kCtlDim = 0x8f, // toggles the 20 dB dim
+    kCtlMasterLevel = 0x90, // level and ramp rate bytes follow
+    kCtlTrayClose = 0x92,
+    kCtlStopAndOpen = 0x93,
+    kCtlAttenuation = 0xc0, // 0xc0-0xcf: 4 dB bytes follow
+    kCtlAttenuationEnd = 0xd0,
+};
+constexpr uint8_t kCtlLevelUnchanged = 0xff; // as a kCtlMasterLevel data byte
+
+// Channel 3; replies come on channel 2.
+enum SystemCommand : uint8_t {
+    kSysFourByte = 0x80, // 0x80-0xef: 4-byte commands, mostly for the servo
+    kSysVersion = 0xf0,
+    kSysFrontDevice = 0xf3,
+    kSysTestPlug = 0xf4,
+    kSysMasterVolume = 0xf5,
+    kSysVideoStandard = 0xf6,
+    kSysReplyIrqOn = 0xf8,
+    kSysReplyIrqOff = 0xf9,
+    kSysForwardOn = 0xfa,
+    kSysForwardOff = 0xfb,
+    kSysPc6High = 0xfc,
+    kSysPc6Release = 0xfd,
+};
+
+// SERVO firmware 2.1 (0x1698).
+enum ServoCommand : uint8_t {
+    kServoVersion = 0xa3,
+    kServoEcho = 0xa4,
+    kServoTrayOpen = 0xa6,
+    kServoTrayClose = 0xa7,
+    kServoStopAndOpen = 0xa8,
+    kServoDiscStatus = 0xb0,
+};
+
+// In the servo's kServoDiscStatus report.
+enum DiscType : uint8_t {
+    kDiscUnknown = 0x00, // TOC not read yet
+    kDiscAudio = 0x01,
+    kDiscNone = 0x03,
+    kDiscCdi = 0x04,
+};
+
+// Channel 0 pointer report, first byte (cdichips "Pointer state").
+enum PointerReport : uint8_t {
+    kReportNone = 0x00,
+    kReportButton1 = 0x10,
+    kReportButton2 = 0x20,
+};
+
+} // namespace slave
+
+struct SlaveSaveState {
     struct Channel {
         uint8_t in[4] = {0}; // accumulated command bytes (opcode first); 0xb0 is the longest
         int in_len = 0;
@@ -36,7 +126,7 @@ struct SlaveSaveState {
         int out_pos = 0;
     };
 
-    Channel channels_[kNumChannels];
+    Channel channels_[slave::kNumChannels];
     // Frames to the servo's next tray step; when closed, until the disc type is known.
     int tray_timer_ = 0;
     // Open or opening: what the frontend sees as ejected.
@@ -47,8 +137,8 @@ struct SlaveSaveState {
     bool reply_irq_enabled_ = false;
     // $52: byte 1 of the servo's 0xa3 reply, the last byte of 0xf0's reply; 0 until then.
     uint8_t servo_version_ = 0;
-    // Servo $99: 1 open, 2-4 closing, 5 closed, 6-9 opening (firmware 0x1ac3).
-    uint8_t tray_state_ = 5;
+    // Servo $99 (firmware 0x1ac3).
+    uint8_t tray_state_ = slave::kTrayClosed; // slave::TrayState
 
     // SLAVE firmware 2.0 audio attenuation; comments give each field's RAM location.
     int timer_cycle_accum_ = 0;
@@ -58,7 +148,7 @@ struct SlaveSaveState {
     uint8_t data_count_ = 0; // $6c
     bool level_mode_ = false; // $59 bit 0: 0x90's 2 bytes pending
     bool master_enabled_ = false; // $59 bit 1, toggled by 0x88
-    uint8_t master_ = 0; // $d6: dB in bits 0-5, bit 6/7 ramp louder/softer
+    uint8_t master_ = 0; // slave::MasterVolume
     uint8_t ramp_count_ = 0x0a; // $d7
     uint8_t ramp_reload_ = 0x0a; // $d8
     bool dim_ = false; // $55 bit 7
@@ -117,7 +207,7 @@ public:
     void set_tray_open(bool open);
     bool tray_open() const { return tray_open_; }
     // Only a fully closed tray lets the CDIC read the disc.
-    bool tray_closed() const { return tray_state_ == 5; }
+    bool tray_closed() const { return tray_state_ == slave::kTrayClosed; }
 
     // Configuration, set once before boot, not saved.
     void set_video_standard(VideoStandard standard) { video_standard_ = standard; }

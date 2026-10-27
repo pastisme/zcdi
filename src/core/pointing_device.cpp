@@ -56,7 +56,8 @@ void PointingDevice::relative_packet() {
     const bool b1 = input_.button1, b2 = input_.button2;
     if (initial_packet_ || b1 != b1_q_ || b2 != b2_q_ || x != x_q_ || y != y_q_ || x != 0 || y != 0) {
         const uint8_t ux = uint8_t(x), uy = uint8_t(y);
-        packet_[0] = uint8_t(0x40 | (b1 ? 0x20 : 0) | (b2 ? 0x10 : 0) | (uy >> 6 & 3) << 2 | (ux >> 6 & 3));
+        packet_[0] = uint8_t(kPacketSync | (b1 ? kPacketButton1 : kPacketNone) | (b2 ? kPacketButton2 : kPacketNone) |
+                             (uy >> 6 & 3) << 2 | (ux >> 6 & 3));
         packet_[1] = uint8_t(ux & 0x3f);
         packet_[2] = uint8_t(uy & 0x3f);
         packet_len_ = 3;
@@ -75,7 +76,8 @@ void PointingDevice::absolute_packet() {
     const bool b1 = input_.button1, b2 = input_.button2, in_area = input_.in_area;
     const bool moved = in_area && (x != x_q_ || y != y_q_);
     if ((initial_packet_ && in_area) || b1 != b1_q_ || b2 != b2_q_ || in_area != in_area_q_ || moved) {
-        packet_[0] = uint8_t(0x40 | (b1 ? 0x20 : 0) | (b2 ? 0x10 : 0) | (x >> 6 & 0x0f));
+        packet_[0] = uint8_t(kPacketSync | (b1 ? kPacketButton1 : kPacketNone) | (b2 ? kPacketButton2 : kPacketNone) |
+                             (x >> 6 & 0x0f));
         packet_[1] = uint8_t((in_area ? 0x20 : 0) | (y >> 6 & 0x0f));
         packet_[2] = uint8_t(x & 0x3f);
         packet_[3] = uint8_t(y & 0x3f);

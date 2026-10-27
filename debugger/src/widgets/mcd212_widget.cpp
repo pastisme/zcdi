@@ -14,10 +14,8 @@
 namespace {
 
 using zcdi::mamecdi::Mcd212SaveState;
+using namespace zcdi::mamecdi::mcd212;
 
-constexpr int kDcaBudgetBytes = 64; // per line, as Mcd212::process_dca
-constexpr int kMaxIcaCommands = 1920;
-constexpr uint32_t kIcaStart = 0x400;
 constexpr ImVec4 kCurrentLine{1.0f, 0.75f, 0.3f, 1.0f};
 
 uint32_t read_be32(std::span<const std::byte> ram, uint32_t off) {
@@ -28,27 +26,27 @@ uint32_t read_be32(std::span<const std::byte> ram, uint32_t off) {
 
 const char* register_name(uint8_t reg) {
     switch (reg) {
-        case 0xc0: return "ICM";
-        case 0xc1: return "TRANSPARENCY";
-        case 0xc2: return "PLANE ORDER";
-        case 0xc3: return "CLUT BANK";
-        case 0xc4: return "TRANSP COLOR A";
-        case 0xc6: return "TRANSP COLOR B";
-        case 0xc7: return "MASK COLOR A";
-        case 0xc9: return "MASK COLOR B";
-        case 0xca: return "DYUV START A";
-        case 0xcb: return "DYUV START B";
-        case 0xcd: return "CURSOR POS";
-        case 0xce: return "CURSOR CTRL";
-        case 0xcf: return "CURSOR PATTERN";
-        case 0xd8: return "BACKDROP";
-        case 0xd9: return "MOSAIC A";
-        case 0xda: return "MOSAIC B";
-        case 0xdb: return "WEIGHT A";
-        case 0xdc: return "WEIGHT B";
+        case kRegImageCodingMethod: return "ICM";
+        case kRegTransparencyControl: return "TRANSPARENCY";
+        case kRegPlaneOrder: return "PLANE ORDER";
+        case kRegClutBank: return "CLUT BANK";
+        case kRegTransparentColorA: return "TRANSP COLOR A";
+        case kRegTransparentColorB: return "TRANSP COLOR B";
+        case kRegMaskColorA: return "MASK COLOR A";
+        case kRegMaskColorB: return "MASK COLOR B";
+        case kRegDyuvAbsStartA: return "DYUV START A";
+        case kRegDyuvAbsStartB: return "DYUV START B";
+        case kRegCursorPosition: return "CURSOR POS";
+        case kRegCursorControl: return "CURSOR CTRL";
+        case kRegCursorPattern: return "CURSOR PATTERN";
+        case kRegBackdropColor: return "BACKDROP";
+        case kRegPixelHoldA: return "MOSAIC A";
+        case kRegPixelHoldB: return "MOSAIC B";
+        case kRegWeightFactorA: return "WEIGHT A";
+        case kRegWeightFactorB: return "WEIGHT B";
         default: break;
     }
-    if (reg >= 0xd0 && reg <= 0xd7) return "REGION";
+    if (reg >= kRegRegionControl && reg < kRegBackdropColor) return "REGION";
     return nullptr;
 }
 
@@ -57,35 +55,35 @@ std::string describe(uint32_t cmd, bool ica) {
     const uint8_t op = uint8_t(cmd >> 24);
     const uint32_t arg = cmd & 0x00ffffffu;
     char text[96]{};
-    if (op <= 0x0f) return "STOP";
-    if (op <= 0x1f) return "NOP";
-    if (op <= 0x2f) {
+    if (op < kCmdNop) return "STOP";
+    if (op < kCmdReloadDcp) return "NOP";
+    if (op < kCmdReloadDcpStop) {
         std::snprintf(text, sizeof(text), ica ? "RELOAD DCP %06X" : "RELOAD DCP %06X (ignored in DCA)",
                       static_cast<unsigned>(arg & 0x3ffffcu));
-    } else if (op <= 0x3f) {
+    } else if (op < kCmdReloadVsr) {
         if (ica) {
             std::snprintf(text, sizeof(text), "RELOAD DCP %06X + STOP", static_cast<unsigned>(arg & 0x3ffffcu));
         } else {
             std::snprintf(text, sizeof(text), "RELOAD DCP %06X, DCA jumps to %05X",
                           static_cast<unsigned>(arg & 0x3ffffcu), static_cast<unsigned>(arg & 0x7fffcu));
         }
-    } else if (op <= 0x4f) {
+    } else if (op < kCmdReloadVsrStop) {
         if (ica) {
             std::snprintf(text, sizeof(text), "JUMP %05X", static_cast<unsigned>((cmd & 0x7ffffu) & ~1u));
         } else {
             std::snprintf(text, sizeof(text), "RELOAD VSR %06X", static_cast<unsigned>(arg & 0x3fffffu));
         }
-    } else if (op <= 0x5f) {
+    } else if (op < kCmdInterrupt) {
         std::snprintf(text, sizeof(text), "RELOAD VSR %06X + STOP", static_cast<unsigned>(arg & 0x3fffffu));
-    } else if (op <= 0x6f) {
+    } else if (op < kCmdUndefined) {
         return "INTERRUPT";
-    } else if (op <= 0x77) {
+    } else if (op < kCmdReloadDisplayParams) {
         return "undefined";
-    } else if (op <= 0x7f) {
+    } else if (op < kCmdSetRegister) {
         std::snprintf(text, sizeof(text), "DISPLAY PARAMETERS %02X", static_cast<unsigned>(arg & 0x1fu));
-    } else if (op <= 0xbf) {
-        std::snprintf(text, sizeof(text), "CLUT bank+%02X = %06X", static_cast<unsigned>(op - 0x80),
-                      static_cast<unsigned>(arg & 0xfcfcfcu));
+    } else if (op < kRegImageCodingMethod) {
+        std::snprintf(text, sizeof(text), "CLUT bank+%02X = %06X", static_cast<unsigned>(op - kRegClut),
+                      static_cast<unsigned>(arg & kColorBits));
     } else if (const char* name = register_name(op)) {
         std::snprintf(text, sizeof(text), "%s (%02X) = %06X", name, static_cast<unsigned>(op),
                       static_cast<unsigned>(arg));
@@ -97,14 +95,14 @@ std::string describe(uint32_t cmd, bool ica) {
 }
 
 const char* coding_name(uint8_t icm, int path, uint8_t other) {
-    if (path == 1 && icm == 0x1 && other == 0x0) return "RGB555";
+    if (path == 1 && icm == kIcmRgb555 && other == kIcmOff) return "RGB555";
     switch (icm) {
-        case 0x0: return "OFF";
-        case 0x1: return "CLUT8";
-        case 0x3: return "CLUT7";
-        case 0x4: return "CLUT7+7";
-        case 0x5: return "DYUV";
-        case 0xb: return "CLUT4 / RL3";
+        case kIcmOff: return "OFF";
+        case kIcmClut8: return "CLUT8";
+        case kIcmClut7: return "CLUT7";
+        case kIcmClut77: return "CLUT7+7";
+        case kIcmDyuv: return "DYUV";
+        case kIcmClut4: return "CLUT4 / RL3";
         default: return "?";
     }
 }
@@ -128,15 +126,14 @@ void row_hex(const char* name, unsigned a, unsigned b, int digits) {
 }
 
 std::string dcr_flags(uint16_t dcr) {
-    // DE CF FD SM CM | IC DC
     std::string s;
-    if (dcr & 0x8000) s += "DE ";
-    if (dcr & 0x4000) s += "CF ";
-    if (dcr & 0x2000) s += "FD ";
-    if (dcr & 0x1000) s += "SM ";
-    if (dcr & 0x0800) s += "CM ";
-    if (dcr & 0x0200) s += "IC ";
-    if (dcr & 0x0100) s += "DC ";
+    if (dcr & kDcrDe) s += "DE ";
+    if (dcr & kDcr1Cf) s += "CF ";
+    if (dcr & kDcr1Fd) s += "FD ";
+    if (dcr & kDcr1Sm) s += "SM ";
+    if (dcr & kDcrCm) s += "CM ";
+    if (dcr & kDcrIc) s += "IC ";
+    if (dcr & kDcrDc) s += "DC ";
     return s.empty() ? "-" : s;
 }
 
@@ -157,7 +154,8 @@ void draw_registers(const Mcd212SaveState& r, const zcdi::mamecdi::Mcd212& chip)
         row_hex("DCP", ((r.ddr_[0] & 0x3fu) << 16) | r.dcp_[0], ((r.ddr_[1] & 0x3fu) << 16) | r.dcp_[1], 6);
         row_hex("DCA", r.dca_[0], r.dca_[1], 6);
         row("Coding", coding_name(r.icm_[0], 0, r.icm_[1]), coding_name(r.icm_[1], 1, r.icm_[0]));
-        row_hex("Transparency", r.transparency_control_ & 0xfu, (r.transparency_control_ >> 8) & 0xfu, 1);
+        row_hex("Transparency", r.transparency_control_ & kTcrField,
+                (r.transparency_control_ >> kTcrPlaneBShift) & kTcrField, 1);
         row_hex("Transp color", r.transparent_color_[0], r.transparent_color_[1], 6);
         row_hex("Mask color", r.mask_color_[0], r.mask_color_[1], 6);
         row_hex("CLUT bank", r.clut_bank_[0], r.clut_bank_[1], 1);
@@ -183,28 +181,30 @@ void draw_registers(const Mcd212SaveState& r, const zcdi::mamecdi::Mcd212& chip)
 // Where the field's picture starts: the RELOAD VSR + STOP the ICA ends on.
 bool ica_start_vsr(std::span<const std::byte> ram, uint32_t& vsr) {
     uint32_t off = kIcaStart;
-    for (int i = 0; i < kMaxIcaCommands && off + 4 <= ram.size(); ++i) {
+    for (int i = 0; i < kIcaMaxCommands && off + 4 <= ram.size(); ++i) {
         const uint32_t cmd = read_be32(ram, off);
         const uint8_t op = uint8_t(cmd >> 24);
-        if (op >= 0x50 && op <= 0x5f) {
+        if (op >= kCmdReloadVsrStop && op < kCmdInterrupt) {
             vsr = cmd & 0x3fffffu;
             return true;
         }
-        if (op <= 0x0f || (op >= 0x30 && op <= 0x3f)) return false;
-        off = (op >= 0x40 && op <= 0x4f) ? ((cmd & 0x7ffffu) & ~1u) : off + 4;
+        if (op < kCmdNop || (op >= kCmdReloadDcpStop && op < kCmdReloadVsr)) return false;
+        off = (op >= kCmdReloadVsr && op < kCmdReloadVsrStop) ? ((cmd & 0x7ffffu) & ~1u) : off + 4;
     }
     return false;
 }
 
 void draw_ica(std::span<const std::byte> ram) {
     uint32_t off = kIcaStart;
-    for (int i = 0; i < kMaxIcaCommands && off + 4 <= ram.size(); ++i) {
+    for (int i = 0; i < kIcaMaxCommands && off + 4 <= ram.size(); ++i) {
         const uint32_t cmd = read_be32(ram, off);
         const uint8_t op = uint8_t(cmd >> 24);
         ImGui::Text("%05X  %08X  %s", static_cast<unsigned>(off), static_cast<unsigned>(cmd),
                     describe(cmd, true).c_str());
-        if (op <= 0x0f || (op >= 0x30 && op <= 0x3f) || (op >= 0x50 && op <= 0x5f)) break;
-        off = (op >= 0x40 && op <= 0x4f) ? ((cmd & 0x7ffffu) & ~1u) : off + 4;
+        if (op < kCmdNop || (op >= kCmdReloadDcpStop && op < kCmdReloadVsr) ||
+            (op >= kCmdReloadVsrStop && op < kCmdInterrupt))
+            break;
+        off = (op >= kCmdReloadVsr && op < kCmdReloadVsrStop) ? ((cmd & 0x7ffffu) & ~1u) : off + 4;
     }
 }
 
@@ -226,13 +226,13 @@ void draw_dca(std::span<const std::byte> ram, uint32_t dcp, int lines, int curre
                           static_cast<unsigned>(cmd), describe(cmd, false).c_str());
             body += line;
             off += 4;
-            if (op <= 0x0f) break;
-            idle = idle && op <= 0x1f;
-            if (op >= 0x30 && op <= 0x3f) {
+            if (op < kCmdNop) break;
+            idle = idle && op < kCmdReloadDcp;
+            if (op >= kCmdReloadDcpStop && op < kCmdReloadVsr) {
                 next = cmd & 0x7fffcu;
                 break;
             }
-            if (op >= 0x50 && op <= 0x5f) break;
+            if (op >= kCmdReloadVsrStop && op < kCmdInterrupt) break;
         }
         dca = next;
         if (idle && hide_idle && y != current) continue;
@@ -281,14 +281,14 @@ void Mcd212Widget::draw(AppState& state) {
             const uint16_t dcr = r.dcr_[path];
             const uint32_t dcp = ((uint32_t(r.ddr_[path]) & 0x3fu) << 16) | r.dcp_[path];
             if (ImGui::BeginTabItem(path == 0 ? "ICA A" : "ICA B")) {
-                if (!(dcr & 0x0200)) ImGui::TextDisabled("DCR.IC off: the ICA doesn't run");
+                if (!(dcr & kDcrIc)) ImGui::TextDisabled("DCR.IC off: the ICA doesn't run");
                 ImGui::BeginChild("ica");
                 draw_ica(ram);
                 ImGui::EndChild();
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem(path == 0 ? "DCA A" : "DCA B")) {
-                if (!(dcr & 0x0100)) ImGui::TextDisabled("DCR.DC off: the DCA doesn't run");
+                if (!(dcr & kDcrDc)) ImGui::TextDisabled("DCR.DC off: the DCA doesn't run");
                 ImGui::Checkbox("Hide lines with no work", &hide_idle_lines_);
                 ImGui::SameLine();
                 ImGui::TextDisabled("from DCP %06X", static_cast<unsigned>(dcp));

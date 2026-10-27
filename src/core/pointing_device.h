@@ -13,6 +13,14 @@ enum class DeviceId : uint8_t {
     kAbsoluteScreen = 'S', // touch screen, light pen
 };
 
+// First byte of a packet: sync, buttons; the rest carries position bits.
+enum PacketBits : uint8_t {
+    kPacketNone = 0x00,
+    kPacketButton2 = 0x10,
+    kPacketButton1 = 0x20,
+    kPacketSync = 0x40,
+};
+
 // CDi_MiSTer rtl/pointing_device.sv.
 struct PointingDeviceSaveState {
     enum State : uint8_t { kHeld, kSendId, kIdle, kSending };

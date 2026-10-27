@@ -16,6 +16,38 @@ enum : int {
     kForm2DataSize = 2324, // Mode 2 Form 2 user data
 };
 
+// Q subcode (Red Book): 12 bytes, CRC last (same_cdi SUBCODE_Q_CONTROL..SUBCODE_Q_CRC1).
+constexpr uint32_t kSubqSize = 12;
+// CONTROL/ADR byte: ADR 1 (position), CONTROL 4 for a data track.
+enum QControl : uint8_t {
+    kQControlAudio = 0x01,
+    kQControlData = 0x41,
+};
+constexpr uint8_t kLeadOutTrack = 0xaa;
+
+// Lead-in TOC points.
+enum TocPoint : uint8_t {
+    kTocPointA0 = 0xa0, // first track; PSEC is the disc type
+    kTocPointA1 = 0xa1, // last track
+    kTocPointA2 = 0xa2, // lead-out start
+};
+enum TocDiscType : uint8_t {
+    kDiscTypeCdda = 0x00,
+    kDiscTypeCdi = 0x10,
+};
+
+// XA subheader SUBMODE bits (Green Book; same_cdi SUBMODE_*).
+enum Submode : uint8_t {
+    kSubmodeEor = 0x01,
+    kSubmodeVideo = 0x02,
+    kSubmodeAudio = 0x04,
+    kSubmodeData = 0x08,
+    kSubmodeTrig = 0x10,
+    kSubmodeForm = 0x20, // Form 2
+    kSubmodeRt = 0x40,
+    kSubmodeEof = 0x80,
+};
+
 // XA subheader (first of the two identical copies).
 struct Subheader {
     uint8_t file = 0;

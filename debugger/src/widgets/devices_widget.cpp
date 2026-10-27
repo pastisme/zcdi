@@ -14,6 +14,8 @@
 
 namespace {
 
+using namespace zcdi::mamecdi::cdic;
+
 // One "name  value" row of the current two-column table.
 void field(const char* name, const char* fmt, ...) {
     ImGui::TableNextRow();
@@ -34,16 +36,16 @@ const char* yes(bool b) { return b ? "yes" : "no"; }
 
 const char* cdic_command_name(uint16_t command) {
     switch (command & 0xff) {
-        case 0x00: return "idle";
-        case 0x23: return "Reset Mode 1";
-        case 0x24: return "Reset Mode 2";
-        case 0x27: return "Fetch TOC";
-        case 0x28: return "Play CDDA";
-        case 0x29: return "Read Mode 1";
-        case 0x2a: return "Read Mode 2";
-        case 0x2b: return "Stop CDDA";
-        case 0x2c: return "Seek";
-        case 0x2e: return "Update";
+        case kCmdIdle: return "idle";
+        case kCmdResetMode1: return "Reset Mode 1";
+        case kCmdResetMode2: return "Reset Mode 2";
+        case kCmdFetchToc: return "Fetch TOC";
+        case kCmdPlayCdda: return "Play CDDA";
+        case kCmdReadMode1: return "Read Mode 1";
+        case kCmdReadMode2: return "Read Mode 2";
+        case kCmdStopCdda: return "Stop CDDA";
+        case kCmdSeek: return "Seek";
+        case kCmdUpdate: return "Update";
         default: return "?";
     }
 }
@@ -58,10 +60,10 @@ void draw_cdic(const zcdi::mamecdi::Cdic& cdic) {
         field("File", "%04X", s.file_);
         field("Channels", "%08X", s.channel_);
         field("Audio channels", "%04X", s.audio_channel_);
-        field("DBUF", "%04X  bank %d%s%s", s.data_buffer_, s.data_buffer_ & 1, (s.data_buffer_ & 4) ? " audio" : "",
-              (s.data_buffer_ & 0x4000) ? " active" : "");
-        field("XBUF", "%04X%s", s.x_buffer_, (s.x_buffer_ & 0x8000) ? "  sector ready" : "");
-        field("ABUF", "%04X%s", s.audio_buffer_, (s.audio_buffer_ & 0x8000) ? "  audio ready" : "");
+        field("DBUF", "%04X  bank %d%s%s", s.data_buffer_, s.data_buffer_ & kDbufBank1,
+              (s.data_buffer_ & kDbufAudio) ? " audio" : "", (s.data_buffer_ & kDbufActive) ? " active" : "");
+        field("XBUF", "%04X%s", s.x_buffer_, (s.x_buffer_ & kBufReady) ? "  sector ready" : "");
+        field("ABUF", "%04X%s", s.audio_buffer_, (s.audio_buffer_ & kBufReady) ? "  audio ready" : "");
         field("AUDCTL", "%04X", s.audio_control_);
         field("DMA control", "%04X", s.dma_control_);
         field("IRQ vector", "%02X", s.interrupt_vector_);
@@ -195,14 +197,15 @@ void draw_slave(const zcdi::mamecdi::SlaveHle& slave) {
               s.buttons_);
         static const char* const kTypes[] = {"none", "relative (M)", "maneuvering (J)", "absolute (T)", "absolute (S)"};
         const unsigned type = unsigned(s.front_type_);
-        field("Front device", "%s%s  %s baud", type < 5 ? kTypes[type] : "power-on",
+        field("Front device", "%s%s  %s baud",
+              type <= unsigned(zcdi::mamecdi::FrontDeviceType::kAbsoluteScreen) ? kTypes[type] : "power-on",
               s.detect_ticks_ ? ", detecting" : "", s.sci_9600_ ? "9600" : "1200");
         static const char* const kPc6[] = {"released", "high", "low"};
         field("Back RTS (PC6)", "%s", kPc6[unsigned(s.pc6_)]);
         ImGui::EndTable();
     }
     if (ImGui::CollapsingHeader("Channels", ImGuiTreeNodeFlags_DefaultOpen) && begin_fields("slave_channels")) {
-        for (int c = 0; c < zcdi::mamecdi::SlaveSaveState::kNumChannels; ++c) {
+        for (int c = 0; c < zcdi::mamecdi::slave::kNumChannels; ++c) {
             const auto& ch = s.channels_[c];
             char in[64]{};
             int at = 0;
