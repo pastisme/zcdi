@@ -1635,6 +1635,10 @@ static void mp3d_synth_granule(float *qmf_state, float *grbuf, int nbands, int n
     }
 
     memcpy(lins, qmf_state, sizeof(float)*15*64);
+    /* zcdi: the last mp3d_synth leaves lanes 2-3 of its +64 block unwritten,
+       and the copy back below stores that stack garbage in qmf_state. It is
+       never read, but it made save states differ between identical runs. */
+    memset(lins + 15*64, 0, sizeof(float)*64*nbands);
 
     for (i = 0; i < nbands; i += 2)
     {
