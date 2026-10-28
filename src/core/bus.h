@@ -1,4 +1,5 @@
 #pragma once
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -63,7 +64,7 @@ public:
     // Verbatim, truncated to Mk48t08::kSize; persistence is the frontend's job.
     void load_nvram(const std::span<const std::byte>& content);
     std::span<const std::byte> nvram_data() const { return std::as_bytes(std::span(nvram_.data(), nvram_.size())); }
-    void set_rtc_boot_time(std::time_t t) { nvram_.set_boot_time(t); }
+    void set_rtc_boot_time(std::chrono::sys_seconds t) { nvram_.set_boot_time(t); }
 
     std::span<const std::byte> plane0_data() const { return std::as_bytes(std::span(plane0_)); }
     std::span<const std::byte> plane1_data() const { return std::as_bytes(std::span(plane1_)); }

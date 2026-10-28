@@ -1,7 +1,7 @@
 #include "doctest.h"
 
+#include <chrono>
 #include <cstdint>
-#include <ctime>
 #include <memory>
 #include <vector>
 
@@ -38,13 +38,8 @@ TEST_CASE("peek reads memory without changing the machine") {
 TEST_CASE("the RTC can be pinned and survives a cold boot") {
     std::vector<std::byte> bios = zcdi_test::fake_bios();
     std::unique_ptr<zcdi::Machine> m = std::make_unique<zcdi::Machine>(bios, zcdi::VideoStandard::kPal);
-    std::tm t{};
-    t.tm_year = 95;
-    t.tm_mon = 6;  // July
-    t.tm_mday = 14;
-    t.tm_hour = 12;
-    t.tm_isdst = -1;
-    m->set_rtc_boot_time(std::mktime(&t));
+    using namespace std::chrono;
+    m->set_rtc_boot_time(sys_days{1995y / July / 14} + 12h);
     m->cold_boot();
     CHECK(m->bus().read8(kNvramBase + 0x1fff * 2) == 0x95);  // year, BCD
     CHECK(m->bus().read8(kNvramBase + 0x1ffe * 2) == 0x07);  // month

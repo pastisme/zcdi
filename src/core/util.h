@@ -4,7 +4,7 @@
 
 namespace zcdi {
 
-// Packed BCD, two digits (0-99).
+// Packed BCD (Binary-coded decimal), two digits (0-99).
 constexpr uint8_t to_bcd(int v) { return uint8_t(((v / 10) << 4) | (v % 10)); }
 constexpr int from_bcd(uint8_t b) { return (b >> 4) * 10 + (b & 0xf); }
 

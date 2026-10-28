@@ -1,5 +1,5 @@
 #pragma once
-#include <ctime>
+#include <chrono>
 #include <memory>
 #include <span>
 #include <string>
@@ -58,9 +58,10 @@ public:
     void set_tray_open(bool open) { bus_.set_tray_open(open); }
     bool tray_open() const { return bus_.tray_open(); }
 
-    // Restarts the RTC at `t`, like MAME's -rtc, for reproducible runs. Kept
-    // across cold_boot() and reset().
-    void set_rtc_boot_time(std::time_t t) { bus_.set_rtc_boot_time(t); }
+    // Restarts the RTC at `t`, like MAME's -rtc, for reproducible runs. `t` is
+    // the wall clock with no time zone, e.g. sys_days{1995y / July / 14} + 12h.
+    // Kept across cold_boot() and reset().
+    void set_rtc_boot_time(std::chrono::sys_seconds t) { bus_.set_rtc_boot_time(t); }
 
     // Only between run_frame() calls. A state must match this machine's
     // BIOS, DVC ROM, options and mounted disc. A load that fails, mismatched

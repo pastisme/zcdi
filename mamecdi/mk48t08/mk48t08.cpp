@@ -26,44 +26,50 @@ constexpr uint32_t kTkDate = 0x1ffd;
 constexpr uint32_t kTkMonth = 0x1ffe;
 constexpr uint32_t kTkYear = 0x1fff;
 static_assert(kTkYear == Mk48t08SaveState::kSize - 1, "the calendar fields end the image");
+
+std::chrono::sys_seconds host_local_time() {
+    using namespace std::chrono;
+    const std::time_t now = std::time(nullptr);
+    const std::tm* lt = std::localtime(&now);
+    if (!lt) return {}; // epoch
+    const year_month_day date{year{lt->tm_year + 1900}, month{unsigned(lt->tm_mon + 1)}, day{unsigned(lt->tm_mday)}};
+    return sys_days{date} + hours{lt->tm_hour} + minutes{lt->tm_min} + seconds{lt->tm_sec};
+}
 } // namespace
 
 // The calendar fields are always computed live, never read from the image
 // (as mk48t08b.sv), so a stale save can't freeze the clock.
-std::time_t Mk48t08::current_time() const {
-    return std::time_t(boot_wall_time_) + static_cast<std::time_t>(elapsed_cycles_ / kCpuClockHz);
-}
-
-std::tm Mk48t08::local_tm() const {
-    const std::time_t t = current_time();
-    std::tm tmv{};
-    if (const std::tm* lt = std::localtime(&t)) tmv = *lt;
-    return tmv;
+std::chrono::sys_seconds Mk48t08::current_time() const {
+    return std::chrono::sys_seconds{std::chrono::seconds{boot_wall_time_ + int64_t(elapsed_cycles_ / kCpuClockHz)}};
 }
 
 uint8_t Mk48t08::read_live_calendar_field(uint32_t offset) const {
-    const std::tm tmv = local_tm();
+    using namespace std::chrono;
+    const sys_seconds t = current_time();
+    const sys_days today = floor<days>(t);
+    const year_month_day date{today};
+    const int secs = int((t - today).count());
 
     switch (offset) {
-        case kTkSecond: return to_bcd(tmv.tm_sec);
-        case kTkMinute: return to_bcd(tmv.tm_min);
-        case kTkHour: return to_bcd(tmv.tm_hour);
-        case kTkDay: return to_bcd(tmv.tm_wday + 1); // 0..6, Sun=0
-        case kTkDate: return to_bcd(tmv.tm_mday);
-        case kTkMonth: return to_bcd(tmv.tm_mon + 1);
-        case kTkYear: return to_bcd((tmv.tm_year + 1900) % 100);
+        case kTkSecond: return to_bcd(secs % 60);
+        case kTkMinute: return to_bcd(secs / 60 % 60);
+        case kTkHour: return to_bcd(secs / 3600);
+        case kTkDay: return to_bcd(int(weekday{today}.c_encoding()) + 1); // 1..7, Sun=1
+        case kTkDate: return to_bcd(int(unsigned(date.day())));
+        case kTkMonth: return to_bcd(int(unsigned(date.month())));
+        case kTkYear: return to_bcd(int(date.year()) % 100);
         default: return 0xff;
     }
 }
 
 Mk48t08::Mk48t08() {
-    boot_wall_time_ = std::time(nullptr);
+    boot_wall_time_ = host_local_time().time_since_epoch().count();
     data_.fill(0xff);
     seed_defaults();
 }
 
-void Mk48t08::set_boot_time(std::time_t t) {
-    boot_wall_time_ = t;
+void Mk48t08::set_boot_time(std::chrono::sys_seconds t) {
+    boot_wall_time_ = t.time_since_epoch().count();
     elapsed_cycles_ = 0;
     seed_century();
 }
@@ -102,8 +108,8 @@ void Mk48t08::seed_defaults() {
 }
 
 void Mk48t08::seed_century() {
-    const std::tm tmv = local_tm();
-    data_[kTkCentury] = to_bcd((tmv.tm_year + 1900) / 100 % 100);
+    const std::chrono::year_month_day date{std::chrono::floor<std::chrono::days>(current_time())};
+    data_[kTkCentury] = to_bcd(int(date.year()) / 100 % 100);
 }
 
 } // namespace mamecdi
