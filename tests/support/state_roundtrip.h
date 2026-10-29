@@ -35,7 +35,7 @@ inline long first_difference(const std::vector<uint8_t>& a, const std::vector<ui
 
 template <class T>
 size_t measure_state(T& obj) {
-    zcdi::StateSizer s;
+    zcdi::StateWriter s;
     obj.state_io(s);
     return s.size();
 }

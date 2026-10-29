@@ -10,7 +10,6 @@
 #include "support/state_roundtrip.h"
 
 using zcdi::StateReader;
-using zcdi::StateSizer;
 using zcdi::StateWriter;
 using zcdi::state_tag;
 
@@ -125,7 +124,7 @@ TEST_CASE("io_struct stores every field in declaration order, as io() calls woul
     m.io(r.d);
     CHECK(bytes == manual);
 
-    StateSizer sz;
+    StateWriter sz;
     sz.io_struct(r);
     CHECK(sz.size() == bytes.size());
 
@@ -181,7 +180,7 @@ TEST_CASE("a state round-trips every field type") {
 
 TEST_CASE("the sizer counts exactly what the writer writes") {
     Sample s = filled();
-    StateSizer sz;
+    StateWriter sz;
     s.state_io(sz);
     CHECK(sz.size() == save(s).size());
 }

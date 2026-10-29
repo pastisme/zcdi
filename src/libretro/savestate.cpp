@@ -36,7 +36,7 @@ size_t save_core_state(Machine& machine, Mixer& audio, InputHistory& input, std:
 }
 
 size_t core_state_size(Machine& machine, Mixer& audio, InputHistory& input) {
-    StateSizer sizer;
+    StateWriter sizer;
     io_frontend(sizer, audio, input);
     return machine.state_size() + sizer.size();
 }

@@ -207,7 +207,6 @@ void mpeg2_state_io(T& archive, mpeg2dec_t* dec) {
 
 template void mpeg2_state_io<StateWriter>(StateWriter&, mpeg2dec_t*);
 template void mpeg2_state_io<StateReader>(StateReader&, mpeg2dec_t*);
-template void mpeg2_state_io<StateSizer>(StateSizer&, mpeg2dec_t*);
 
 } // namespace dvc
 } // namespace zcdi

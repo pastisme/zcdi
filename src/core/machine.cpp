@@ -140,12 +140,11 @@ void Machine::state_io(T& archive, StateLoadContext context) {
 }
 template void Machine::state_io<StateWriter>(StateWriter&, StateLoadContext);
 template void Machine::state_io<StateReader>(StateReader&, StateLoadContext);
-template void Machine::state_io<StateSizer>(StateSizer&, StateLoadContext);
 
 void Machine::save_state(StateWriter& w) { state_io(w); }
 
 size_t Machine::state_size() {
-    StateSizer s;
+    StateWriter s;
     state_io(s);
     return s.size();
 }

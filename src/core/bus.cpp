@@ -219,7 +219,6 @@ template void Bus::nvram_state_io<StateWriter>(StateWriter&);
 template void Bus::nvram_state_io<StateReader>(StateReader&);
 template void Bus::ram_state_io<StateWriter>(StateWriter&);
 template void Bus::ram_state_io<StateReader>(StateReader&);
-template void Bus::ram_state_io<StateSizer>(StateSizer&);
 
 void Bus::set_disc(Disc* disc) {
     disc_ = disc;

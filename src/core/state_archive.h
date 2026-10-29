@@ -10,8 +10,8 @@
 
 namespace zcdi {
 
-// One state_io(T& archive) field list per class drives StateWriter, StateReader
-// and StateSizer. Little-endian; sections are tag + length.
+// One state_io(T& archive) field list per class drives StateWriter (which also
+// sizes) and StateReader. Little-endian; sections are tag + length.
 
 // Load-time cap for unbounded buffers, against corrupt lengths.
 constexpr size_t kStateMaxBuffer = size_t(16) << 20;
@@ -59,7 +59,7 @@ T from_bits(U bits) {
 }
 
 // Fields of a plain struct, without listing them: count them by aggregate
-// initialisation (one braced initialiser per field), then bind them all (up to 130).
+// initialisation (one braced initialiser per field), then bind them all (up to 110).
 struct AnyField {
     template <class T>
     operator T() const;
@@ -95,8 +95,6 @@ consteval size_t field_count() {
 #define ZCDI_F8 ZCDI_F7 ZCDI_U10(a7),
 #define ZCDI_F9 ZCDI_F8 ZCDI_U10(a8),
 #define ZCDI_F10 ZCDI_F9 ZCDI_U10(a9),
-#define ZCDI_F11 ZCDI_F10 ZCDI_U10(a10),
-#define ZCDI_F12 ZCDI_F11 ZCDI_U10(a11),
 #define ZCDI_CASE(n, ...)          \
     else if constexpr (N == (n)) { \
         auto& [__VA_ARGS__] = s;   \
@@ -118,7 +116,7 @@ consteval size_t field_count() {
 template <class S, class F>
 void for_fields(S& s, F&& f) {
     constexpr size_t N = field_count<S>();
-    static_assert(N <= 130, "split this struct");
+    static_assert(N <= 110, "split this struct");
     if constexpr (N == 0) return;
     ZCDI_TEN(0)
     ZCDI_TEN(1)
@@ -131,8 +129,6 @@ void for_fields(S& s, F&& f) {
     ZCDI_TEN(8)
     ZCDI_TEN(9)
     ZCDI_TEN(10)
-    ZCDI_TEN(11)
-    ZCDI_TEN(12)
 }
 
 #undef ZCDI_U1
@@ -156,8 +152,6 @@ void for_fields(S& s, F&& f) {
 #undef ZCDI_F8
 #undef ZCDI_F9
 #undef ZCDI_F10
-#undef ZCDI_F11
-#undef ZCDI_F12
 #undef ZCDI_CASE
 #undef ZCDI_TEN
 
@@ -257,6 +251,8 @@ class StateWriter : public StateArchiveBase<StateWriter> {
 public:
     static constexpr bool kLoading = false;
 
+    // Counts bytes only, for retro_serialize_size().
+    StateWriter() : counting_(true) {}
     explicit StateWriter(std::vector<uint8_t>& out) : out_(&out) {}
     // Writes into a fixed buffer; failed() once it would overflow.
     explicit StateWriter(std::span<uint8_t> fixed) : fixed_(fixed) {}
@@ -293,6 +289,8 @@ public:
         const uint8_t* b = static_cast<const uint8_t*>(p);
         if (out_) {
             out_->insert(out_->end(), b, b + n);
+        } else if (counting_) {
+            pos_ += n;
         } else if (n <= fixed_.size() - pos_) {
             std::memcpy(fixed_.data() + pos_, b, n);
             pos_ += n;
@@ -314,7 +312,7 @@ public:
     void end_section() {
         size_t at = section_starts_.back();
         section_starts_.pop_back();
-        if (overflow_) return;
+        if (overflow_ || counting_) return;
         uint8_t* base = out_ ? out_->data() : fixed_.data();
         uint32_t len = uint32_t(size() - at - 4);
         for (int i = 0; i < 4; ++i)
@@ -330,6 +328,7 @@ private:
     std::vector<uint8_t>* out_ = nullptr;
     std::span<uint8_t> fixed_{};
     size_t pos_ = 0;
+    bool counting_ = false;
     bool overflow_ = false;
     std::vector<size_t> section_starts_;
 };
@@ -440,48 +439,9 @@ private:
     std::vector<size_t> section_ends_;
 };
 
-class StateSizer : public StateArchiveBase<StateSizer> {
-public:
-    static constexpr bool kLoading = false;
-
-    template <class T>
-    void io(T& v) {
-        size_ += sizeof(state_detail::to_bits(v));
-    }
-
-    // Hides the base's: sizes without touching the elements.
-    template <class T>
-    void io_span(std::span<T> s) {
-        if (!s.empty()) size_ += s.size() * sizeof(state_detail::to_bits(s[0]));
-    }
-
-    template <class T>
-    void io_fixed(std::vector<T>& v) {
-        size_ += 4;
-        io_span(std::span<T>(v));
-    }
-
-    template <class T>
-    void io_vec(std::vector<T>& v, size_t) {
-        io_fixed(v);
-    }
-
-    void raw(const void*, size_t n) { size_ += n; }
-    void begin_section(uint32_t) { size_ += 8; }
-    void end_section() {}
-    void check(bool) {}
-    bool failed() const { return false; }
-
-    size_t size() const { return size_; }
-
-private:
-    size_t size_ = 0;
-};
-
 } // namespace zcdi
 
 // Use once in the class's .cpp, after the out-of-line state_io definition.
 #define ZCDI_STATE_IO_INSTANTIATE(Class)                                      \
     template void Class::state_io<::zcdi::StateWriter>(::zcdi::StateWriter&); \
-    template void Class::state_io<::zcdi::StateReader>(::zcdi::StateReader&); \
-    template void Class::state_io<::zcdi::StateSizer>(::zcdi::StateSizer&)
+    template void Class::state_io<::zcdi::StateReader>(::zcdi::StateReader&)
