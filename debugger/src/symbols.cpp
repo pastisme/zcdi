@@ -4,7 +4,11 @@
 #include <cstdio>
 #include <fstream>
 
+#include "core/util.h"
+
 namespace {
+
+using zcdi::trim;
 
 // Six or more hex digits at `s`, as an address; -1 if none.
 long parse_hex_address(const std::string& s, std::size_t pos, std::size_t* end) {
@@ -14,13 +18,6 @@ long parse_hex_address(const std::string& s, std::size_t pos, std::size_t* end) 
     if (i - pos < 6) return -1;
     if (end) *end = i;
     return std::stol(s.substr(pos, i - pos), nullptr, 16);
-}
-
-std::string trim(const std::string& s) {
-    const std::size_t a = s.find_first_not_of(" \t\r");
-    if (a == std::string::npos) return {};
-    const std::size_t b = s.find_last_not_of(" \t\r");
-    return s.substr(a, b - a + 1);
 }
 
 } // namespace

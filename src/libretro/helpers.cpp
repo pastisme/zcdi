@@ -1,15 +1,14 @@
 #include "helpers.h"
 
-#include <algorithm>
 #include <cstdarg>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
-#include <string_view>
 
 #include "audio/mixer.h"
 #include "core/machine.h"
 #include "core/machine_inspector.h"
+#include "disc/file_io.h"
 #include "input_mapping.h"
 
 namespace zcdi {
@@ -19,16 +18,10 @@ namespace fs = std::filesystem;
 
 retro_log_printf_t log_cb = nullptr;
 
-fs::path as_generic_path(std::string_view s) {
-    std::string normalized{s};
-    std::ranges::replace(normalized, '\\', '/');
-    return fs::path(normalized);
-}
-
 // `name` inside `dir`, or `name` as-is without one.
 fs::path in_dir(const char* dir, const char* name) {
     if (!dir || !*dir) return name;
-    return as_generic_path(dir) / as_generic_path(name);
+    return disc_generic_path(dir) / disc_generic_path(name);
 }
 } // namespace
 

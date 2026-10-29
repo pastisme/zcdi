@@ -1,8 +1,16 @@
 #pragma once
 #include <algorithm>
 #include <cstdint>
+#include <string>
+#include <string_view>
 
 namespace zcdi {
+
+inline std::string trim(std::string_view s) {
+    const auto a = s.find_first_not_of(" \t\r\n");
+    if (a == std::string_view::npos) return {};
+    return std::string(s.substr(a, s.find_last_not_of(" \t\r\n") - a + 1));
+}
 
 // Packed BCD (Binary-coded decimal), two digits (0-99).
 constexpr uint8_t to_bcd(int v) { return uint8_t(((v / 10) << 4) | (v % 10)); }

@@ -2,16 +2,9 @@
 
 #include <sstream>
 
-namespace zcdi {
+#include "core/util.h"
 
-namespace {
-std::string trim(const std::string& s) {
-    const char* ws = " \t\r\n";
-    auto a = s.find_first_not_of(ws);
-    if (a == std::string::npos) return {};
-    return s.substr(a, s.find_last_not_of(ws) - a + 1);
-}
-} // namespace
+namespace zcdi {
 
 bool parse_m3u(const std::string& text, std::vector<M3uEntry>& out) {
     out.clear();
