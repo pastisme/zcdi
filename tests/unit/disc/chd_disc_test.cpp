@@ -5,6 +5,7 @@
 #include <memory>
 
 #include "disc/chd_disc.h"
+#include "fixtures/chd_postgap_fixture.h"
 #include "fixtures/chd_two_track_fixture.h"
 
 using namespace zcdi;
@@ -17,11 +18,10 @@ struct MemFile {
     size_t pos = 0;
 };
 
-std::unique_ptr<DiscContext> fixture_context() {
-    auto ctx = std::make_unique<DiscContext>("two_track.chd");
-    ctx->open_read = [](const std::string&) -> DiscContext::Handle {
-        return new MemFile{zcdi_test::kChdTwoTrackFixtureBytes, sizeof(zcdi_test::kChdTwoTrackFixtureBytes)};
-    };
+template <size_t N>
+std::unique_ptr<DiscContext> fixture_context(const uint8_t (&bytes)[N]) {
+    auto ctx = std::make_unique<DiscContext>("fixture.chd");
+    ctx->open_read = [&bytes](const std::string&) -> DiscContext::Handle { return new MemFile{bytes, N}; };
     ctx->read = [](DiscContext::Handle h, void* dst, size_t len) -> size_t {
         auto* f = static_cast<MemFile*>(h);
         size_t n = len < f->size - f->pos ? len : f->size - f->pos;
@@ -49,7 +49,7 @@ std::unique_ptr<DiscContext> fixture_context() {
 TEST_SUITE("disc") {
 
 TEST_CASE("CHD tracks after the first skip chdman's padding frames") {
-    std::unique_ptr<Disc> disc = open_chd_disc(fixture_context());
+    std::unique_ptr<Disc> disc = open_chd_disc(fixture_context(zcdi_test::kChdTwoTrackFixtureBytes));
     REQUIRE(disc);
 
     auto toc = disc->toc_tracks();
@@ -66,6 +66,28 @@ TEST_CASE("CHD tracks after the first skip chdman's padding frames") {
         REQUIRE(disc->read_sector(lba, s));
         CHECK(s.data[0] == 0x10 + lba);
         CHECK(s.data[kRawSectorSize - 1] == 0x10 + lba);
+    }
+}
+
+TEST_CASE("CHD postgap sectors read as blank, not as padding or the next track") {
+    std::unique_ptr<Disc> disc = open_chd_disc(fixture_context(zcdi_test::kChdPostgapFixtureBytes));
+    REQUIRE(disc);
+
+    auto toc = disc->toc_tracks();
+    REQUIRE(toc.size() == 2);
+    CHECK(toc[1].start_lba == 10); // 6 frames + 4 postgap
+    CHECK(disc->lead_out_lba() == 13);
+
+    // The postgap is longer than track 1's 2 padding frames, so a CHD frame
+    // offset would reach track 2's first frames.
+    for (int lba = 0; lba < 13; ++lba) {
+        CAPTURE(lba);
+        RawSector s{};
+        REQUIRE(disc->read_sector(lba, s));
+        const int frame = lba < 6 ? lba : lba >= 10 ? lba - 4 : -1; // bin frames, gap removed
+        const uint8_t want = frame < 0 ? 0 : uint8_t(0x10 + frame);
+        CHECK(s.data[0] == want);
+        CHECK(s.data[kRawSectorSize - 1] == want);
     }
 }
 

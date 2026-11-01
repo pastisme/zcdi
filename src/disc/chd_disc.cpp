@@ -99,10 +99,10 @@ public:
         }
         if (!t) return false;
 
-        if (static_cast<uint32_t>(lba) < t->logframeofs) {
+        if (static_cast<uint32_t>(lba) - t->logframeofs >= t->frames) {
             std::memset(out.data, 0, sizeof(out.data));
             out.sub = Subheader{};
-            return true; // synthesized (never physically stored) pregap
+            return true; // postgap: never stored, and may outrun chdman's padding
         }
 
         uint32_t chd_frame = t->chdframeofs + (static_cast<uint32_t>(lba) - t->logframeofs);
