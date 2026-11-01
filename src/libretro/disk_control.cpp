@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "core/machine.h"
@@ -78,8 +79,10 @@ bool RETRO_CALLCONV disk_replace_image_index(unsigned index, const struct retro_
         }
         return true;
     }
-    g_disc_paths[index] = {info->path, {}};
-    return index != g_disc_index || insert_disc_image(index);
+    auto old = std::exchange(g_disc_paths[index], {info->path, {}});
+    if (index != g_disc_index || insert_disc_image(index)) return true;
+    g_disc_paths[index] = std::move(old);
+    return false;
 }
 
 bool RETRO_CALLCONV disk_add_image_index(void) {
