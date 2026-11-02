@@ -167,6 +167,7 @@ bool DvcVideo::output_picture(const void* picture_buffer) {
     }
     pending.width = int(seq->picture_width);
     pending.height = int(seq->picture_height);
+    pending.picture_rate_code = picture_rate_code(seq->frame_period);
     pack_yuv(*fbuf, *seq, pending.yuv);
     pending.timecode = info.timecode;
     pending.video_status = uint8_t(info.temporal_ref << 2 | info.coding_type);
@@ -220,8 +221,6 @@ bool DvcVideo::decode_frame() {
                     const int decoded = buffer_index(dec, info->current_fbuf);
                     if (decoded >= 0 && info->sequence != nullptr) {
                         last_decoded_timecode_ = picture_info_[size_t(decoded)].timecode;
-                        last_decoded_width_ = int(info->sequence->picture_width);
-                        last_decoded_height_ = int(info->sequence->picture_height);
                         last_decoded_picture_rate_code_ = picture_rate_code(info->sequence->frame_period);
                         picture_decoded_pending_ = true;
                     }

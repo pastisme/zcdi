@@ -38,6 +38,20 @@ TEST_CASE("first frame presents when asked") {
     CHECK(v.height() == kDvcMpeg1Height);
 }
 
+// Bus publishes the next picture's size to VMPEG IMGSZ.
+TEST_CASE("the next picture is the front of the queue") {
+    DvcVideo v;
+    CHECK_FALSE(v.has_next_picture());
+    feed_all(v);
+    CHECK(v.decode_frame() == true);
+    REQUIRE(v.has_next_picture());
+    CHECK(v.next_width() == kDvcMpeg1Width);
+    CHECK(v.next_height() == kDvcMpeg1Height);
+    CHECK(v.next_picture_rate_code() == v.last_decoded_picture_rate_code());
+    CHECK(v.present_next_frame() == true);
+    CHECK(v.has_next_picture() == (v.queue_depth() > 0));
+}
+
 TEST_CASE("queued pictures show in order with no drops") {
     DvcVideo v;
     feed_all(v);

@@ -28,7 +28,7 @@ constexpr int kRate2997 = 4;
 
 void start_playback(VmpegDevice& v, int rate_code) {
     zcdi_test::priv<PlayerPlaybackActive>(v) = true;
-    v.set_video_frame_decoded(352, 288, rate_code);
+    v.set_video_frame_decoded(rate_code);
 }
 
 // Fields, out of `fields`, on which a picture is shown, with `ready`
@@ -68,7 +68,7 @@ TEST_CASE("a 29.97 Hz stream keeps its rate on 50 Hz fields") {
 
 TEST_CASE("nothing is shown while playback is stopped or no picture waits") {
     VmpegDevice v;
-    v.set_video_frame_decoded(352, 288, kRate25);
+    v.set_video_frame_decoded(kRate25);
     CHECK(shown_fields(v, 10).empty());  // playback not active
 
     zcdi_test::priv<PlayerPlaybackActive>(v) = true;
@@ -96,7 +96,7 @@ TEST_CASE("synchronous mode shortens the period while the clock leads the DTS") 
 
 TEST_CASE("Step shows one picture while playback is stopped") {
     VmpegDevice v;
-    v.set_video_frame_decoded(352, 288, kRate25);
+    v.set_video_frame_decoded(kRate25);
     write16(v, kFmvSyscmdOffset, 0x0040);  // Step
     // Armed at the first vsync, shown at the second (mpeg_video.sv:962-965).
     CHECK(shown_fields(v, 10) == std::vector<int>{2});

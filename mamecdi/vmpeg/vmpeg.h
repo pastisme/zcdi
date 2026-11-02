@@ -273,14 +273,13 @@ struct VmpegSaveState {
     uint16_t fmv_decoder_command_ = 0; // GEN_DEC_CMD, 0xe04088
     uint16_t fmv_video_data_input_command_register_ = 0; // GEN_VDI_CMD
     uint16_t image_width_ = 0, image_height_ = 0, image_rt_ = 0;
+    bool fmv_decoder_active_ = false; // Play to Stop/Decoder Off (vmpeg.sv:944)
     uint16_t display_width_ = 0, display_height_ = 0; // last picture shown
     uint16_t decoder_frameperiod_90khz_ = 0;
     uint8_t decoder_frameperiod_rawhdr_ = 0;
     int fmv_decoder_held_pictures_ = 0;
     uint32_t fmv_decoder_input_bytes_ = 0; // handed to the decoder, not yet parsed
     bool fmv_dts_start_satisfied_ = false; // display_dts_desync_satisfied_latch
-    // Frame player: playback_frame_cnt, latch_frame_until_vsync,
-    // display_dts_desync_q, frame_period (30 MHz clocks).
     int64_t player_frame_cnt_ = 0;
     bool player_latch_pending_ = false;
     int player_desync_q_ = 0;
@@ -368,7 +367,9 @@ public:
 
     // Also commits a pending non-scroll RegsUpd.
     void set_video_frame_ready(int width, int height);
-    void set_video_frame_decoded(int width, int height, int picture_rate_code);
+    void set_video_frame_decoded(int picture_rate_code);
+    // IMGSZ: the picture shown next, once playing (mv_trigger() NIS timing).
+    void set_next_picture(int width, int height, int picture_rate_code);
     void set_video_buffer_underflow();
 
     void set_video_gop_start();

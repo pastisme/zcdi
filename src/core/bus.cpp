@@ -106,8 +106,7 @@ void Bus::dvc_tick_frame(double refresh_rate_hz) {
     dvc_video_.decode_frame();
     if (dvc_video_.consume_picture_decoded()) {
         vmpeg_.set_video_decoder_timecode(dvc_video_.last_decoded_timecode());
-        vmpeg_.set_video_frame_decoded(dvc_video_.last_decoded_width(), dvc_video_.last_decoded_height(),
-                                       dvc_video_.last_decoded_picture_rate_code());
+        vmpeg_.set_video_frame_decoded(dvc_video_.last_decoded_picture_rate_code());
     }
     vmpeg_.set_decoder_held_pictures(dvc_video_.decoder_held_pictures());
     vmpeg_.set_decoder_input_bytes(dvc_video_.input_bytes());
@@ -131,6 +130,9 @@ void Bus::dvc_tick_frame(double refresh_rate_hz) {
         report_presented();
         if (dvc_video_.presented_starts_gop()) vmpeg_.set_video_gop_start();
         if (dvc_video_.presented_starts_sequence()) vmpeg_.set_video_sequence_start();
+    }
+    if (dvc_video_.has_next_picture()) {
+        vmpeg_.set_next_picture(dvc_video_.next_width(), dvc_video_.next_height(), dvc_video_.next_picture_rate_code());
     }
     // No picture of its own, so checked every field.
     if (dvc_video_.consume_sequence_end()) vmpeg_.set_video_sequence_end();

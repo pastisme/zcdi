@@ -211,6 +211,7 @@ void VmpegDevice::handle_fmv_syscmd_write(uint16_t value) {
         fmv_dclk_start_video_latched_ = true;
         fmv_decoder_command_ |= 0x0042;
         fmv_slow_motion_ = uint8_t(value & kSysCmdSlowMotion);
+        fmv_decoder_active_ = true;
     }
     if (value & kSysCmdPause) {
         fmv_playback_active_ = false;
@@ -230,6 +231,7 @@ void VmpegDevice::handle_fmv_syscmd_write(uint16_t value) {
     if (value & kSysCmdStop) {
         fmv_playback_active_ = false;
         fmv_dclk_start_video_latched_ = false;
+        fmv_decoder_active_ = false;
     }
     if (value & kSysCmdClearFifo) {
         reset_fmv_pipeline();
@@ -246,6 +248,7 @@ void VmpegDevice::handle_fmv_syscmd_write(uint16_t value) {
         fmv_dsp_enable_ = false;
         // fmv_reset_persistent_storage drops the latched picture (frameplayer.sv:44).
         decoder_off_pending_ = true;
+        fmv_decoder_active_ = false;
         image_width_ = 0;
         image_height_ = 0;
         image_rt_ = 0;
@@ -519,13 +522,20 @@ void VmpegDevice::commit_register_update() {
     latched_window_height_ = video_ctrl_window_height_ & 0x1ff;
 }
 
+void VmpegDevice::set_next_picture(int width, int height, int picture_rate_code) {
+    if (!fmv_decoder_active_) return;
+    image_width_ = uint16_t(width);
+    image_height_ = uint16_t(height);
+    image_rt_ = uint16_t(picture_rate_code & 0xff);
+}
+
 void VmpegDevice::set_video_frame_ready(int width, int height) {
     fmv_interrupt_status_register_ |= kIntPic;
     display_width_ = uint16_t(width);
     display_height_ = uint16_t(height);
 }
 
-void VmpegDevice::set_video_frame_decoded(int width, int height, int picture_rate_code) {
+void VmpegDevice::set_video_frame_decoded(int picture_rate_code) {
     // vmpeg.sv:653-657, mpeg_video.sv:894-896. 90000 / rate (CDi_MiSTer sw/mpeg_video/pl_mpeg.h).
     static constexpr uint16_t kPeriod90khz[16] = {
         100, 3753, 3750, 3600, 3003, 3000, 1800, 1501, 1500, 100, 100, 100, 100, 100, 100, 100,
@@ -536,9 +546,6 @@ void VmpegDevice::set_video_frame_decoded(int width, int height, int picture_rat
         500000, 10000,   10000,   10000,   10000,   10000,   10000,  10000,
     };
     player_frame_period_ = kPeriod30mhz[picture_rate_code & 0xf];
-    image_width_ = uint16_t(width);
-    image_height_ = uint16_t(height);
-    image_rt_ = uint16_t(picture_rate_code & 0xff);
     if (!fmv_dsp_enable_) return;
     decoder_frameperiod_rawhdr_ = uint8_t(picture_rate_code & 0xff);
     decoder_frameperiod_90khz_ = kPeriod90khz[picture_rate_code & 0xf];

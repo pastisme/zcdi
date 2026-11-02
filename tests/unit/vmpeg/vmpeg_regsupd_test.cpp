@@ -27,7 +27,7 @@ TEST_SUITE("vmpeg") {
 // vsync after each frame period tick, whether a picture is waiting or not.
 TEST_CASE("a non-scroll RegsUpd commits at the frame player's display slot") {
     VmpegDevice v;
-    v.set_video_frame_decoded(368, 272, /*picture_rate_code=*/3);  // 25 Hz
+    v.set_video_frame_decoded(/*picture_rate_code=*/3);  // 25 Hz
     write16(v, kFmvVidcmdOffset, kRegsUpd);
     v.notify_vsync();
     CHECK_FALSE(vcup_dcl(v));

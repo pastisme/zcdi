@@ -25,6 +25,7 @@ struct DvcVideoSaveState {
         bool starts_sequence = false;
         uint32_t timecode = 0;
         uint8_t video_status = 0;
+        int picture_rate_code = 0;
     };
     std::deque<PendingPicture> queue_;
     // The last one presented; still there after decoder_off().
@@ -34,8 +35,6 @@ struct DvcVideoSaveState {
     uint32_t last_decoded_timecode_ = 0;
     bool picture_decoded_pending_ = false;
     int decoder_held_pictures_ = 0;
-    int last_decoded_width_ = 0;
-    int last_decoded_height_ = 0;
     int last_decoded_picture_rate_code_ = 0;
 
     // Decoder side, as CDi_MiSTer's sw/mpeg_video/main.c push_frame() and pl_mpeg.h track it.
@@ -105,10 +104,12 @@ public:
 
     // Time codes already in the FMV register layout.
     uint32_t last_decoded_timecode() const { return last_decoded_timecode_; }
-    int last_decoded_width() const { return last_decoded_width_; }
-    int last_decoded_height() const { return last_decoded_height_; }
     int last_decoded_picture_rate_code() const { return last_decoded_picture_rate_code_; }
     uint32_t presented_timecode() const { return presented_.timecode; }
+    bool has_next_picture() const { return !queue_.empty(); }
+    int next_width() const { return queue_.front().width; }
+    int next_height() const { return queue_.front().height; }
+    int next_picture_rate_code() const { return queue_.front().picture_rate_code; }
     // SYS_VSR
     uint8_t presented_video_status() const { return presented_.video_status; }
 
