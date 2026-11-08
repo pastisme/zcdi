@@ -25,6 +25,9 @@ void msf_from_lba(int lba, uint8_t& m, uint8_t& s, uint8_t& f) {
 // Independent 75 Hz sector tick (cdic_clock_gen.sv sector_tick).
 constexpr int kCyclesPerSectorTick = kCpuClockHz / 75; // 200000
 
+// cdic.sv dbuf15_reset_cnt: sector ticks a read or seek keeps DBUF bit 15 (6f4ce1f).
+constexpr int kDbufTriggerResetTicks = 5;
+
 // The backends are synchronous, so a bad sector never turns good: bound retries.
 constexpr int kMaxReadFailStreak = 19;
 
@@ -136,6 +139,9 @@ void Cdic::raise_irq4() {
 }
 
 void Cdic::signal_sector() {
+    // cdic.sv: the first sector used ends a command's DBUF bit 15.
+    data_buffer_ &= ~kDbufTrigger;
+    dbuf_trigger_reset_count_ = 0;
     x_buffer_ |= kBufReady;
     data_buffer_ |= kDbufActive;
     raise_irq4();
@@ -254,6 +260,7 @@ void Cdic::handle_data_buffer_write(uint16_t value) {
         // CD-DA mode lasts until the next command executes (cdic.sv read_cdda).
         cdda_mode_ = command == kCmdPlayCdda;
         spin_down_count_ = 0; // a new command cancels a pending interrupt
+        dbuf_trigger_reset_count_ = 0;
         x_buffer_ &= ~kBufReady; // and acknowledges the last one (cdic.sv:613)
         if (command == kCmdResetMode1 || command == kCmdResetMode2) {
             stop_read();
@@ -270,7 +277,13 @@ void Cdic::handle_data_buffer_write(uint16_t value) {
             if (disc_command_ == kCmdIdle) spin_down_count_ = 2;
         }
         // anything unrecognized: untouched.
-        data_buffer_ &= ~kDbufTrigger;
+        // Reads keep bit 15 until their first sector, Read Mode 1/2 and Seek
+        // at most 5 sector ticks ("usually like 6 sectors before XBUF[15]").
+        if (command == kCmdReadMode1 || command == kCmdReadMode2 || command == kCmdSeek) {
+            dbuf_trigger_reset_count_ = kDbufTriggerResetTicks;
+        } else if (command != kCmdFetchToc && command != kCmdPlayCdda) {
+            data_buffer_ &= ~kDbufTrigger;
+        }
     }
     if (!(value & kDbufActive)) {
         stop_read();
@@ -313,6 +326,7 @@ void Cdic::tick_cycles(int cpu_cycles) {
             x_buffer_ |= kBufReady;
             raise_irq4();
         }
+        if (dbuf_trigger_reset_count_ > 0 && --dbuf_trigger_reset_count_ == 0) data_buffer_ &= ~kDbufTrigger;
     }
 
     if (disc_command_ == kCmdIdle) return;

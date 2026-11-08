@@ -101,33 +101,38 @@ void Bus::dvc_tick_frame(double refresh_rate_hz) {
         dvc_video_.clear_fifo();
     }
     // Demuxed by VMPEG from the channel-1 DMA and XFER writes.
-    dvc_video_.feed(vmpeg_.drain_fmv_es_bytes());
+    std::vector<dvc::DvcVideo::ArrivalMark> arrivals;
+    for (const auto& a : vmpeg_.drain_fmv_es_arrivals())
+        arrivals.push_back({a.offset, a.time});
+    dvc_video_.feed(vmpeg_.drain_fmv_es_bytes(), arrivals);
     if (vmpeg_.consume_fmv_program_end()) dvc_video_.note_program_end();
-    dvc_video_.decode_frame();
+    const uint32_t now = vmpeg_.free_running_dclk();
+    dvc_video_.decode_frame(now);
+    for (int n = dvc_video_.consume_discarded_pictures(); n > 0; --n) {
+        vmpeg_.note_picture_discarded();
+    }
     if (dvc_video_.consume_picture_decoded()) {
         vmpeg_.set_video_decoder_timecode(dvc_video_.last_decoded_timecode());
         vmpeg_.set_video_frame_decoded(dvc_video_.last_decoded_picture_rate_code());
     }
-    vmpeg_.set_decoder_held_pictures(dvc_video_.decoder_held_pictures());
     vmpeg_.set_decoder_input_bytes(dvc_video_.input_bytes());
 
-    // The frame player decides presentation; skipped pictures raise no PIC.
+    // The frame player decides presentation.
     const uint32_t field_clocks = uint32_t(std::lround(30000000.0 / refresh_rate_hz));
     field_samples_ = int32_t(std::lround(44100.0 / refresh_rate_hz));
+    // One vsync edge per field: RegsUpd is taken there, before the picture is selected.
+    vmpeg_.notify_vsync();
     const auto step = vmpeg_.frame_player_field(field_clocks, dvc_video_.queue_depth());
-    const auto report_presented = [&] {
-        vmpeg_.set_video_display_timecode(dvc_video_.presented_timecode());
-        vmpeg_.set_video_display_status(dvc_video_.presented_video_status());
-    };
-    for (int i = 0; i < step.skipped && dvc_video_.present_next_frame(); ++i) {
-        vmpeg_.note_picture_displayed();
-        report_presented();
-    }
     // PIC, GOP and SEQ belong to the display process.
     if (step.show && dvc_video_.present_next_frame()) {
         vmpeg_.note_picture_displayed();
+        // The latch freed a slot: a waiting push_frame() goes ahead before line 11.
+        dvc_video_.resume_push(now);
+        vmpeg_.check_buffer_underflow(dvc_video_.queue_depth(), dvc_video_.decoder_held_pictures());
         vmpeg_.set_video_frame_ready(dvc_video_.width(), dvc_video_.height());
-        report_presented();
+        vmpeg_.set_video_display_timecode(dvc_video_.presented_timecode());
+        vmpeg_.set_video_display_status(dvc_video_.presented_video_status());
+        vmpeg_.set_video_display_picture_rate(dvc_video_.presented_picture_rate_code());
         if (dvc_video_.presented_starts_gop()) vmpeg_.set_video_gop_start();
         if (dvc_video_.presented_starts_sequence()) vmpeg_.set_video_sequence_start();
     }
@@ -136,16 +141,16 @@ void Bus::dvc_tick_frame(double refresh_rate_hz) {
     }
     // No picture of its own, so checked every field.
     if (dvc_video_.consume_sequence_end()) vmpeg_.set_video_sequence_end();
-    // RTL event_last_picture_starts_display: NDAT and EOD together.
-    if (dvc_video_.consume_last_picture_shown()) {
-        vmpeg_.set_video_buffer_underflow();
-        vmpeg_.set_video_last_picture();
-    }
+    // RTL event_last_picture_starts_display.
+    if (dvc_video_.consume_last_picture_shown()) vmpeg_.set_video_last_picture();
 }
 
 int Bus::video_begin_field(int lines) { return mcd212_.begin_field(lines); }
 
-void Bus::video_end_of_line(int line) { mcd212_.end_of_line(line, plane0_.data(), plane1_.data(), plane0_.size()); }
+void Bus::video_end_of_line(int line) {
+    mcd212_.end_of_line(line, plane0_.data(), plane1_.data(), plane0_.size());
+    vmpeg_.notify_line(line, mcd212_.first_active_line(), mcd212_.active_height());
+}
 
 void Bus::video_end_field() {
     if (dvc_video_.has_frame()) {
@@ -156,7 +161,6 @@ void Bus::video_end_field() {
     mcd212_.set_dvc_window(w.scrpos_x, w.scrpos_y, w.decwin_w, w.decwin_h, w.decoff_x, w.decoff_y, w.show,
                            w.vcd_pixel_clock);
     mcd212_.end_field();
-    vmpeg_.notify_vsync(); // one vsync edge per field
 }
 
 template <class T>

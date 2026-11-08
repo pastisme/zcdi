@@ -119,9 +119,9 @@ void draw_vmpeg(const zcdi::mamecdi::VmpegDevice& vmpeg, const zcdi::dvc::DvcVid
     }
     if (ImGui::CollapsingHeader("Window", ImGuiTreeNodeFlags_DefaultOpen) && begin_fields("fmv_window")) {
         field("Display offset", "%d, %d  (latched %d, %d)", s.video_ctrl_x_offset_, s.video_ctrl_y_offset_,
-              s.latched_display_offset_x_, s.latched_display_offset_y_);
+              s.latched_window_.display_offset_x, s.latched_window_.display_offset_y);
         field("Window", "%dx%d  (latched %dx%d)", s.video_ctrl_window_width_, s.video_ctrl_window_height_,
-              s.latched_window_width_, s.latched_window_height_);
+              s.latched_window_.width, s.latched_window_.height);
         field("Decoder offset", "%d, %d", s.video_ctrl_decoder_offset_x_, s.video_ctrl_decoder_offset_y_);
         field("RegsUpd pending", "%s", yes(s.register_update_latch_));
         field("VCD pixel clock", "%s", yes(s.vcd_pixel_clock_));

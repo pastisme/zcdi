@@ -101,11 +101,13 @@ namespace {
 enum DclkDelay : uint32_t {
     kPauseDelayTicks = 100, // ~2.2 ms, vmpeg.sv:894-895
     kPlayStartDelayTicks = 1000, // ~22 ms, Play/Continue
+    kScrLoadTicks = 15, // pack SCR into fmv_dclk unless the CPU writes GEN_SYSCR first
 };
 
 // mpeg_video.sv totally_out_of_sync_need_frameskip, 90 kHz.
-constexpr int64_t kFrameSkipThreshold = 15000;
-constexpr int kMaxSkipsPerBlanking = 20;
+constexpr int64_t kOutOfSyncThreshold = 15000;
+// mpeg_video.sv keep_synchronizer_cnt: pictures without a DTS keep the last desync.
+constexpr uint8_t kDesyncHoldPictures = 3;
 
 // mpeg_video.sv display_dts_desync: dclk[20:6] - DTS[21:7], 15-bit signed.
 int dts_desync(uint32_t dclk, int64_t dts) {
@@ -160,13 +162,13 @@ uint16_t VmpegDevice::read_word(uint32_t word_index) const {
         case kFmvImageWidth: return image_width_;
         case kFmvImageHeight: return image_height_;
         case kFmvImageRt: return image_rt_;
-        case kFmvTimecodeHiA: return uint16_t(fmv_display_timecode_ >> 16);
-        case kFmvTimecodeLoA: return uint16_t(fmv_display_timecode_);
-        case kFmvTimecodeHiB: return uint16_t(fmv_decoder_timecode_ >> 16);
-        case kFmvTimecodeLoB: return uint16_t(fmv_decoder_timecode_);
+        case kFmvDecoderTimecodeHi: return uint16_t(fmv_decoder_timecode_ >> 16);
+        case kFmvDecoderTimecodeLo: return uint16_t(fmv_decoder_timecode_);
         case kFmvDisplayW: return display_width_ & 0x7ff; // vmpeg.sv:529
         case kFmvDisplayH: return display_height_ & 0x1ff;
-        case kFmvPicRt: return decoder_frameperiod_rawhdr_;
+        case kFmvPicRt: return display_frameperiod_rawhdr_;
+        case kFmvDisplayTimecodeHi: return uint16_t(fmv_display_timecode_ >> 16);
+        case kFmvDisplayTimecodeLo: return uint16_t(fmv_display_timecode_);
         case kFmvTempref: return fmv_display_video_status_; // SYS_VSR, displayed picture
         case kFmvSysSts: return fmv_input_fifo_full() ? 0 : kSysStsFifoNotFull; // vmpeg.sv:523
         case kFmvIer: return fmv_interrupt_enable_register_;
@@ -184,14 +186,15 @@ uint16_t VmpegDevice::read_word(uint32_t word_index) const {
         case kFmvDecoffX: return video_ctrl_decoder_offset_x_;
         case kFmvGenDecCmd: return fmv_decoder_command_;
         case kFmvGenVdiCmd: return fmv_video_data_input_command_register_;
-        case kFmvGenSyscr: return uint16_t(fmv_dclk_ >> 6) & 0xffff;
+        case kFmvGenSyscr: return uint16_t(fmv_dclk_ >> 6) & 0x7fff; // bit 21 reads 0: the driver's SCR sign
         case kFmvGenSyncDiff: return 0; // vmpeg.sv:501
         case kFmvGenDecDelay: return 1; // older RTL revisions: 0xfe96
         case kFmvDts: return fmv_dts_register();
         case kFmvPicsInFifo: return fmv_pictures_in_fifo();
-        case kFmvPicRate: return decoder_frameperiod_90khz_;
-        case kFmvDisplayRate: return video_standard_ == VideoStandard::kPal ? kDisplayRatePal : kDisplayRateNtsc;
-        case kFmvFrameRate: return fmv_frame_rate_;
+        case kFmvPicRate: // twice the display rate until a picture is decoded (vmpeg.sv fmv_picture_rate)
+            return decoder_frameperiod_90khz_ != 0 ? decoder_frameperiod_90khz_ : uint16_t(fmv_display_rate() << 1);
+        case kFmvDisplayRate: return fmv_display_rate();
+        case kFmvFrameRate: return 1; // vmpeg.sv approximation, "allow window updates"; writes ignored
         case kFmvSyscmd: return fmv_system_command_register_;
         case kFmvVidcmd: return fmv_video_command_register_;
         case kFmvStreamNum: return fmv_stream_number_ & 0xf;
@@ -209,7 +212,7 @@ void VmpegDevice::handle_fmv_syscmd_write(uint16_t value) {
     if (value & kSysCmdPlay) {
         fmv_dclk_start_video_ = fma_dclk_ + kPlayStartDelayTicks;
         fmv_dclk_start_video_latched_ = true;
-        fmv_decoder_command_ |= 0x0042;
+        fmv_decoder_command_ |= kDecCmdRunning;
         fmv_slow_motion_ = uint8_t(value & kSysCmdSlowMotion);
         fmv_decoder_active_ = true;
     }
@@ -248,7 +251,9 @@ void VmpegDevice::handle_fmv_syscmd_write(uint16_t value) {
         fmv_dsp_enable_ = false;
         // fmv_reset_persistent_storage drops the latched picture (frameplayer.sv:44).
         decoder_off_pending_ = true;
+        fmv_es_has_sequence_header_ = false; // as DvcVideo::decoder_off()
         fmv_decoder_active_ = false;
+        fmv_decoder_command_ &= ~kDecCmdRunning;
         image_width_ = 0;
         image_height_ = 0;
         image_rt_ = 0;
@@ -263,19 +268,24 @@ void VmpegDevice::reset_fmv_pipeline() {
     fmv_playback_active_ = false;
     fmv_dclk_start_video_latched_ = false;
     fmv_es_bytes_.clear();
+    fmv_es_arrivals_.clear();
     fmv_program_end_pending_ = false;
     reset_fmv_demux();
     fmv_dts_fifo_.clear();
-    fmv_decoder_held_pictures_ = 0;
+    fmv_pictures_received_ = 0;
     fmv_decoder_input_bytes_ = 0;
     player_desync_q_ = 0;
+    player_desync_hold_ = 0;
+    player_predicted_dts_ = 0;
+    player_predicted_dts_valid_ = false;
     player_step_latch_ = false;
     player_latch_pending_ = false;
+    player_playback_active_delayed_ = false; // reset_dsp_enabled
     fmv_decoder_timecode_ = 0;
     fmv_display_timecode_ = 0;
     fmv_display_video_status_ = 0;
     decoder_frameperiod_90khz_ = 0;
-    decoder_frameperiod_rawhdr_ = 0;
+    display_frameperiod_rawhdr_ = 0;
 }
 
 void VmpegDevice::handle_fmv_vidcmd_write(uint16_t value) {
@@ -283,8 +293,15 @@ void VmpegDevice::handle_fmv_vidcmd_write(uint16_t value) {
     fmv_video_command_register_ = value;
 
     if (value & kVidCmdRegsUpd) {
+        // A scroll update in vertical blanking first applies a pending picture update.
+        if ((value & kVidCmdScroll) && in_vertical_blank() && window_update_.next_pending) {
+            latched_window_ = window_update_.next;
+            window_update_.deferred_pending = false;
+            window_update_.next_pending = false;
+        }
         register_update_latch_ = true;
         register_update_scroll_ = (value & kVidCmdScroll) != 0;
+        window_update_.late = fmv_playback_active_ && window_scan_started();
     }
     if (value & kVidCmdHide) fmv_show_on_next_video_frame_ = false;
     if (value & kVidCmdShow) fmv_show_on_next_video_frame_ = true;
@@ -410,8 +427,10 @@ void VmpegDevice::write_word(uint32_t word_index, uint16_t value, bool completin
                 fmv_decoder_command_ = value;
             break;
         case kFmvGenVdiCmd: fmv_video_data_input_command_register_ = value; break;
-        case kFmvGenSyscr: fmv_dclk_ = (fmv_dclk_ & ~uint32_t(0xffff << 6)) | (uint32_t(value) << 6); break;
-        case kFmvFrameRate: fmv_frame_rate_ = value; break;
+        case kFmvGenSyscr:
+            fmv_dclk_ = (fmv_dclk_ & ~uint32_t(0x7fff << 6)) | (uint32_t(value & 0x7fff) << 6);
+            fmv_scr_load_countdown_ = 0; // the driver's value wins
+            break;
         case kFmvImageWidth: image_width_ = value; break;
         case kFmvImageHeight: image_height_ = value; break;
         case kFmvImageRt: image_rt_ = value; break;
@@ -461,6 +480,8 @@ void VmpegDevice::tick_cycles(int cpu_cycles) {
 
         fma_dclk_ += 1;
         fmv_dclk_ += 1;
+        // vmpeg.sv: the demuxer sets the FMV DCLK too (45 kHz, so SCR / 2).
+        if (fmv_scr_load_countdown_ > 0 && --fmv_scr_load_countdown_ == 0) fmv_dclk_ = uint32_t(fmv_demux_.scr >> 1);
 
         // mpeg_playback_timer.sv compares for equality; a past start time fires at once.
         if (fma_start_valid_ && int32_t(fma_dclk_ - fma_start_dclk_) >= 0) {
@@ -491,9 +512,70 @@ void VmpegDevice::tick_cycles(int cpu_cycles) {
 void VmpegDevice::notify_vsync() {
     // Each call is one vsync edge (vmpeg.sv:608).
     fmv_interrupt_status_register_ |= kIntVsync;
+    fmv_line_ = 0;
+    ndat_line_pending_ = false;
+    if (!register_update_latch_) return;
 
-    // vmpeg.sv:678: scroll-mode RegsUpd.
-    if (register_update_latch_ && register_update_scroll_) commit_register_update();
+    // vmpeg.sv (a59880a): every RegsUpd is taken at vsync, with VCUP and DCL.
+    register_update_latch_ = false;
+    fmv_interrupt_status_register_ |= kIntVcup | kIntDcl;
+    if (register_update_scroll_) {
+        latched_window_ = live_window();
+        window_update_.deferred_pending = false;
+        window_update_.next_pending = false;
+        window_update_.next_late = false;
+    } else { // waits for the next picture
+        window_update_.next = live_window();
+        window_update_.next_pending = true;
+        window_update_.next_late = window_update_.late;
+    }
+}
+
+void VmpegDevice::apply_window_updates(bool picture_selected) {
+    // After the last picture, updates go on at vsync: no picture will take them.
+    const bool held = !picture_selected && window_update_.last_picture_held;
+    if (picture_selected || !fmv_decoder_active_) window_update_.last_picture_held = false;
+    if (!picture_selected && !held) return;
+    if (window_update_.deferred_pending) {
+        latched_window_ = window_update_.deferred;
+        window_update_.deferred_pending = false;
+    }
+    if (window_update_.next_pending) {
+        // Written after the window started scanning out: keep it for the picture after.
+        if (picture_selected && window_update_.next_late) {
+            window_update_.deferred = window_update_.next;
+            window_update_.deferred_pending = true;
+        } else {
+            latched_window_ = window_update_.next;
+        }
+        window_update_.next_pending = false;
+    }
+}
+
+bool VmpegDevice::in_vertical_blank() const {
+    return fmv_line_ < fmv_first_active_line_ || fmv_line_ >= fmv_first_active_line_ + fmv_active_lines_;
+}
+
+// frameplayer.sv window_scan_started: the window's first line has been drawn this field.
+bool VmpegDevice::window_scan_started() const {
+    return fmv_show_on_next_video_frame_ && !in_vertical_blank() &&
+           fmv_line_ >= fmv_first_active_line_ + int(latched_window_.display_offset_x);
+}
+
+void VmpegDevice::notify_line(int line, int first_active_line, int active_lines) {
+    fmv_line_ = line + 1;
+    fmv_first_active_line_ = first_active_line;
+    fmv_active_lines_ = active_lines;
+    // mpeg_video.sv hsync_cnt == 11.
+    if (ndat_line_pending_ && fmv_line_ == 11) {
+        ndat_line_pending_ = false;
+        fmv_interrupt_status_register_ |= kIntNdat;
+    }
+    // mpeg_video.sv latch_frame_until_vblank: the picture starts display with the first active line.
+    if (line + 1 == first_active_line && fmv_display_events_pending_ != 0) {
+        fmv_interrupt_status_register_ |= fmv_display_events_pending_;
+        fmv_display_events_pending_ = 0;
+    }
 }
 
 bool VmpegDevice::irq_asserted() const {
@@ -508,18 +590,16 @@ int VmpegDevice::iack_vector() const {
     return (fmv_interrupt_vector_register_ >> 3) & 0xff;
 }
 
-void VmpegDevice::commit_register_update() {
-    // vmpeg.sv:678-694. VCUP always comes with DCL.
-    fmv_interrupt_status_register_ |= (kIntVcup | kIntDcl);
-    register_update_latch_ = false;
-
-    // X and Y swapped as in the RTL (vmpeg.sv:160-165).
-    latched_display_offset_y_ = video_ctrl_x_display_ & 0x1ff;
-    latched_display_offset_x_ = video_ctrl_y_display_ & 0x1ff;
-    latched_window_offset_y_ = video_ctrl_decoder_offset_y_ & 0x1ff;
-    latched_window_offset_x_ = video_ctrl_decoder_offset_x_ & 0x1ff;
-    latched_window_width_ = video_ctrl_window_width_ & 0x1ff;
-    latched_window_height_ = video_ctrl_window_height_ & 0x1ff;
+// X and Y swapped as in the RTL (vmpeg.sv:160-165), 9 bits each.
+FmvWindow VmpegDevice::live_window() const {
+    return {
+        .display_offset_y = uint16_t(video_ctrl_x_display_ & 0x1ff),
+        .display_offset_x = uint16_t(video_ctrl_y_display_ & 0x1ff),
+        .window_offset_y = uint16_t(video_ctrl_decoder_offset_y_ & 0x1ff),
+        .window_offset_x = uint16_t(video_ctrl_decoder_offset_x_ & 0x1ff),
+        .width = uint16_t(video_ctrl_window_width_ & 0x1ff),
+        .height = uint16_t(video_ctrl_window_height_ & 0x1ff),
+    };
 }
 
 void VmpegDevice::set_next_picture(int width, int height, int picture_rate_code) {
@@ -530,7 +610,7 @@ void VmpegDevice::set_next_picture(int width, int height, int picture_rate_code)
 }
 
 void VmpegDevice::set_video_frame_ready(int width, int height) {
-    fmv_interrupt_status_register_ |= kIntPic;
+    fmv_display_events_pending_ |= kIntPic;
     display_width_ = uint16_t(width);
     display_height_ = uint16_t(height);
 }
@@ -547,21 +627,30 @@ void VmpegDevice::set_video_frame_decoded(int picture_rate_code) {
     };
     player_frame_period_ = kPeriod30mhz[picture_rate_code & 0xf];
     if (!fmv_dsp_enable_) return;
-    decoder_frameperiod_rawhdr_ = uint8_t(picture_rate_code & 0xff);
     decoder_frameperiod_90khz_ = kPeriod90khz[picture_rate_code & 0xf];
 }
 
-void VmpegDevice::set_video_buffer_underflow() { fmv_interrupt_status_register_ |= kIntNdat; }
+void VmpegDevice::check_buffer_underflow(size_t output_pictures, int decoder_pictures) {
+    // The DTS FIFO holds input + decoder + output, so the input count includes the picture being decoded.
+    const int input_pictures = int(fmv_dts_fifo_.size()) - int(output_pictures) - decoder_pictures;
+    if (fmv_playback_active_ && ndat_armed_ && output_pictures <= 1 && decoder_pictures < 2 && input_pictures <= 1) {
+        ndat_armed_ = false;
+        ndat_line_pending_ = true;
+    }
+}
 
-void VmpegDevice::set_video_gop_start() { fmv_interrupt_status_register_ |= kIntGop; }
+void VmpegDevice::set_video_gop_start() { fmv_display_events_pending_ |= kIntGop; }
 
-void VmpegDevice::set_video_sequence_start() { fmv_interrupt_status_register_ |= kIntSeq; }
+void VmpegDevice::set_video_sequence_start() { fmv_display_events_pending_ |= kIntSeq; }
 
 void VmpegDevice::set_video_sequence_end() { fmv_interrupt_status_register_ |= kIntEsi; }
 
 void VmpegDevice::set_video_program_end() { fmv_interrupt_status_register_ |= kIntEii; }
 
-void VmpegDevice::set_video_last_picture() { fmv_interrupt_status_register_ |= kIntEod; }
+void VmpegDevice::set_video_last_picture() {
+    fmv_display_events_pending_ |= kIntEod;
+    window_update_.last_picture_held = true;
+}
 
 void VmpegDevice::set_audio_program_end() {
     fma_interrupt_status_register_ |= kFmaIntIsoEnd;
@@ -653,16 +742,20 @@ void VmpegDevice::set_video_display_status(uint8_t status) {
     if (fmv_dsp_enable_) fmv_display_video_status_ = status;
 }
 
+void VmpegDevice::set_video_display_picture_rate(int picture_rate_code) {
+    if (fmv_dsp_enable_) display_frameperiod_rawhdr_ = uint8_t(picture_rate_code & 0xff);
+}
+
 bool VmpegDevice::fmv_input_fifo_full() const {
     // Demuxed bytes still here count too: the RTL writes them straight into the FIFO.
     return fmv_decoder_input_bytes_ + fmv_es_bytes_.size() > kFmvInputFifoFullBytes;
 }
 
 uint16_t VmpegDevice::fmv_pictures_in_fifo() const {
-    // mpeg_video.sv pictures_in_fifo: decoder-held pictures don't count during playback.
-    int count = int(fmv_dts_fifo_.size());
-    if (fmv_playback_active_) count -= fmv_decoder_held_pictures_;
-    return uint16_t(std::clamp(count, 0, 0x7f));
+    // mpeg_video.sv pictures_in_fifo: until Play, every picture received, as if nothing was decoded yet.
+    if (!fmv_decoder_active_) return fmv_pictures_received_;
+    const int count = int(fmv_dts_fifo_.size());
+    return uint16_t(std::min(count > 1 ? count - 1 : count, 0x7f));
 }
 
 bool VmpegDevice::video_display_enabled() {
@@ -680,8 +773,22 @@ bool VmpegDevice::video_display_enabled() {
 }
 
 void VmpegDevice::note_picture_displayed() {
-    if (!fmv_dts_fifo_.empty()) fmv_dts_fifo_.erase(fmv_dts_fifo_.begin());
+    if (fmv_dts_fifo_.empty()) return;
+    // mpeg_video.sv predicted_dts: the last DTS plus a picture period per picture after it.
+    const int64_t head = fmv_dts_fifo_.front();
+    if (head != 0 && decoder_frameperiod_90khz_ != 0) {
+        player_predicted_dts_ = head + decoder_frameperiod_90khz_;
+        player_predicted_dts_valid_ = true;
+    } else if (player_predicted_dts_valid_ && decoder_frameperiod_90khz_ != 0) {
+        player_predicted_dts_ += decoder_frameperiod_90khz_;
+    } else {
+        player_predicted_dts_valid_ = false;
+    }
+    fmv_dts_fifo_.erase(fmv_dts_fifo_.begin());
 }
+
+// Its DTS leaves the dts_fifo like a shown picture's (mpeg_video.sv dts_fifo strobe).
+void VmpegDevice::note_picture_discarded() { note_picture_displayed(); }
 
 VmpegDevice::FramePlayerStep VmpegDevice::frame_player_field(uint32_t field_clocks, size_t pictures_ready) {
     FramePlayerStep step;
@@ -693,60 +800,66 @@ VmpegDevice::FramePlayerStep VmpegDevice::frame_player_field(uint32_t field_cloc
             player_latch_pending_ = true;
         }
     };
+    // The rising edge against playback_active_delayed arms NDAT; nothing disarms it but NDAT.
+    if (fmv_playback_active_ && !player_playback_active_delayed_) ndat_armed_ = true;
     if (!fmv_playback_active_) {
         player_frame_cnt_ = 0;
-        if (player_latch_pending_) potential_picture_starts_display();
         step.show = player_latch_pending_ && pictures_ready > 0;
         player_latch_pending_ = false;
+        apply_window_updates(step.show);
         arm_step();
         return step;
     }
     const bool synchronous = (fmv_system_control_register_ & kSysScrSynchronous) != 0;
-    // totally_out_of_sync_need_frameskip for the picture `i` places down
-    // the dts_fifo (each skipped picture's DTS leaves it).
-    auto out_of_sync = [&](size_t i) {
-        return synchronous && fmv_demux_scr_valid_ && i < fmv_dts_fifo_.size() && fmv_dts_fifo_[i] != 0 &&
-               fmv_demux_.scr - fmv_dts_fifo_[i] > kFrameSkipThreshold;
-    };
-    // One skip per line of vertical blanking at most.
-    while (size_t(step.skipped) < pictures_ready && step.skipped < kMaxSkipsPerBlanking &&
-           out_of_sync(size_t(step.skipped))) {
-        ++step.skipped;
-    }
-    const size_t ready = pictures_ready - size_t(step.skipped);
-    const size_t next = size_t(step.skipped);
+    const bool head_has_dts = !fmv_dts_fifo_.empty() && fmv_dts_fifo_.front() != 0;
+    // totally_out_of_sync_need_frameskip: now only forces the shortest period.
+    const bool out_of_sync =
+        head_has_dts && fmv_demux_scr_valid_ && fmv_demux_.scr - fmv_dts_fifo_.front() > kOutOfSyncThreshold;
     if (counting) {
         player_frame_cnt_ += field_clocks;
         for (;;) {
             // sw/mpeg_video/main.c multiplies the period by the slow-motion factor.
-            int64_t period = int64_t(player_frame_period_) * (fmv_slow_motion_ + 1);
+            const int64_t period = int64_t(player_frame_period_) * (fmv_slow_motion_ + 1);
+            // Speed control stays within 1/8 of the period, as measured on a VMPEG.
+            const int64_t shortest = period - period / 8, longest = period + period / 8;
             int64_t top = period - 1 - int64_t(player_desync_q_) * 2048;
+            if (top < shortest || out_of_sync) top = shortest;
+            if (top > longest) top = longest;
             if (top < 1) top = 1;
             if (player_frame_cnt_ < top) break;
             player_frame_cnt_ -= top + 1;
             if (period <= 1200) continue; // mpeg_video.sv only latches above this
             player_latch_pending_ = true;
-            if (ready == 0) continue; // frame_period_tick needs a picture waiting
+            player_playback_active_delayed_ = true;
+            if (pictures_ready == 0) continue; // frame_period_tick needs a picture waiting
             // dclk at the wrap, player_frame_cnt_ 30 MHz clocks before the field end.
-            bool has_dts = next < fmv_dts_fifo_.size() && fmv_dts_fifo_[next] != 0;
-            uint32_t dclk_at_wrap = fmv_dclk_ - uint32_t(player_frame_cnt_ * 3 / 2000);
-            player_desync_q_ =
-                has_dts && synchronous && !out_of_sync(next) ? dts_desync(dclk_at_wrap, fmv_dts_fifo_[next]) : 0;
+            const uint32_t dclk_at_wrap = fmv_dclk_ - uint32_t(player_frame_cnt_ * 3 / 2000);
+            update_player_desync(dclk_at_wrap, synchronous);
         }
     }
     if (player_latch_pending_) {
         player_latch_pending_ = false;
-        potential_picture_starts_display();
-        step.show = ready > 0;
+        step.show = pictures_ready > 0;
     }
+    apply_window_updates(step.show);
     arm_step();
     return step;
 }
 
-// vmpeg.sv:679, event_potential_picture_starts_display: also with no picture
-// ready (mpeg_video.sv:918-921).
-void VmpegDevice::potential_picture_starts_display() {
-    if (register_update_latch_ && !register_update_scroll_) commit_register_update();
+// mpeg_video.sv display_dts_desync_q at frame_period_tick, against the head's DTS
+// or, without one, the predicted DTS; a measurement holds for 3 more pictures.
+void VmpegDevice::update_player_desync(uint32_t dclk, bool synchronous) {
+    const bool head_has_dts = !fmv_dts_fifo_.empty() && fmv_dts_fifo_.front() != 0;
+    const bool use_predicted = !fmv_dts_fifo_.empty() && !head_has_dts && player_predicted_dts_valid_;
+    const bool syncing = synchronous && fmv_slow_motion_ == 0; // no sync in slow motion
+    if (syncing && (head_has_dts || use_predicted)) {
+        player_desync_q_ = dts_desync(dclk, head_has_dts ? fmv_dts_fifo_.front() : player_predicted_dts_);
+        player_desync_hold_ = kDesyncHoldPictures;
+    } else if (syncing && player_desync_hold_ > 0) {
+        --player_desync_hold_;
+    } else {
+        player_desync_q_ = 0;
+    }
 }
 
 void VmpegDevice::reset_fmv_demux() {
@@ -758,11 +871,23 @@ void VmpegDevice::reset_fmv_demux() {
 }
 
 void VmpegDevice::fmv_es_byte(uint8_t b) {
+    note_fmv_es_arrival();
     fmv_es_bytes_.push_back(b);
     fmv_es_shift_ = (fmv_es_shift_ << 8) | b;
-    if (fmv_es_shift_ != (kStartCodePrefix | kPictureStart)) return;
-    if (fmv_dts_fifo_.size() < kDtsFifoDepth) fmv_dts_fifo_.push_back(fmv_next_picture_dts_);
-    fmv_next_picture_dts_ = 0;
+    if ((fmv_es_shift_ & kStartCodePrefixMask) != kStartCodePrefix) return;
+    switch (uint8_t(fmv_es_shift_)) {
+        case kSequenceHeader: fmv_es_has_sequence_header_ = true; break;
+        case kSequenceEnd: fmv_es_has_sequence_header_ = false; break; // the decoder waits for the next
+        case kPictureStart:
+            fmv_pictures_received_ = uint8_t((fmv_pictures_received_ + 1) & 0x7f);
+            // Without a header the decoder skips it: its DTS goes with it.
+            if (fmv_es_has_sequence_header_ && fmv_dts_fifo_.size() < kDtsFifoDepth) {
+                fmv_dts_fifo_.push_back(fmv_next_picture_dts_);
+            }
+            fmv_next_picture_dts_ = 0;
+            break;
+        default: break;
+    }
 }
 
 void VmpegDevice::fmv_demux_byte(uint8_t b) {
@@ -778,6 +903,8 @@ void VmpegDevice::fmv_demux_byte(uint8_t b) {
             if (b == kSequenceHeader) { // first: an elementary stream
                 fmv_demux_mode_ = kDemuxModeElementary;
                 fmv_es_shift_ = kStartCodePrefix | kSequenceHeader;
+                fmv_es_has_sequence_header_ = true;
+                note_fmv_es_arrival();
                 fmv_es_bytes_.insert(fmv_es_bytes_.end(), {0x00, 0x00, 0x01, kSequenceHeader});
                 return;
             }
@@ -792,7 +919,10 @@ void VmpegDevice::fmv_demux_byte(uint8_t b) {
         return;
     }
     const uint8_t events = d.step(b, uint8_t(kVideoStream + (fmv_stream_number_ & 0xf)));
-    if (events & PsDemux::kScr) fmv_demux_scr_valid_ = true;
+    if (events & PsDemux::kScr) {
+        fmv_demux_scr_valid_ = true;
+        fmv_scr_load_countdown_ = kScrLoadTicks;
+    }
     if (events & PsDemux::kLastTimestamp) {
         // The last 5 bytes: DTS if present, else PTS (mpeg_demuxer.sv).
         fmv_demuxer_dts_ = d.timestamp();
@@ -803,14 +933,15 @@ void VmpegDevice::fmv_demux_byte(uint8_t b) {
 }
 
 VmpegDevice::DisplayWindow VmpegDevice::display_window() const {
-    // latched_display_offset_y holds X (vmpeg.sv:160-165).
+    // display_offset_y holds X (vmpeg.sv:160-165).
+    const FmvWindow& w = latched_window_;
     return {
-        .scrpos_x = latched_display_offset_y_,
-        .scrpos_y = latched_display_offset_x_,
-        .decwin_w = latched_window_width_,
-        .decwin_h = latched_window_height_,
-        .decoff_x = latched_window_offset_x_,
-        .decoff_y = latched_window_offset_y_,
+        .scrpos_x = w.display_offset_y,
+        .scrpos_y = w.display_offset_x,
+        .decwin_w = w.width,
+        .decwin_h = w.height,
+        .decoff_x = w.window_offset_x,
+        .decoff_y = w.window_offset_y,
         .show = fmv_show_on_next_video_frame_,
         .vcd_pixel_clock = vcd_pixel_clock_,
     };

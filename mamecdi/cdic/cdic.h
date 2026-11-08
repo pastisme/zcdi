@@ -118,6 +118,8 @@ struct CdicSaveState {
     // Sector ticks until XBUF bit 15 after Stop/Update (cdic.sv spin_down_cnt); 0 = none.
     int spin_down_count_ = 0;
     int spin_down_cycle_accum_ = 0;
+    // Sector ticks until a read or seek clears DBUF bit 15 (cdic.sv dbuf15_reset_cnt); 0 = none.
+    int dbuf_trigger_reset_count_ = 0;
 
     int read_fail_streak_ = 0;
 

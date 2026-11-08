@@ -20,6 +20,8 @@ ZCDI_PRIVATE_MEMBER(PlayerFmvDclk, VmpegSaveState, fmv_dclk_, uint32_t);
 ZCDI_PRIVATE_MEMBER(PlayerDtsFifo, VmpegSaveState, fmv_dts_fifo_, std::vector<int64_t>);
 ZCDI_PRIVATE_MEMBER(PlayerDemux, VmpegSaveState, fmv_demux_, zcdi::mamecdi::PsDemux);
 ZCDI_PRIVATE_MEMBER(PlayerScrValid, VmpegSaveState, fmv_demux_scr_valid_, bool);
+ZCDI_PRIVATE_MEMBER(PlayerDesyncQ, VmpegSaveState, player_desync_q_, int);
+ZCDI_PRIVATE_MEMBER(PlayerStartSatisfied, VmpegSaveState, fmv_dts_start_satisfied_, bool);
 
 namespace {
 constexpr uint32_t kPalFieldClocks = 600000;       // 30 MHz / 50 Hz
@@ -39,6 +41,17 @@ std::vector<int> shown_fields(VmpegDevice& v, int fields, size_t ready = 8) {
         if (v.frame_player_field(kPalFieldClocks, ready).show) shown.push_back(f);
     }
     return shown;
+}
+
+// The desync measured for each shown picture, popping it from the dts_fifo as Bus does.
+std::vector<int> shown_desyncs(VmpegDevice& v, size_t count) {
+    std::vector<int> out;
+    for (int f = 0; f < 100 && out.size() < count; ++f) {
+        if (!v.frame_player_field(kPalFieldClocks, 8).show) continue;
+        out.push_back(zcdi_test::priv<PlayerDesyncQ>(v));
+        v.note_picture_displayed();
+    }
+    return out;
 }
 
 // A DTS (90 kHz) that puts dclk[20:6] - DTS[21:7] at `desync`.
@@ -117,23 +130,76 @@ TEST_CASE("slow motion multiplies the picture period") {
     CHECK(shown_fields(v, 40).size() == 10u);  // every 4th PAL field
 }
 
-TEST_CASE("synchronous mode drops pictures far behind the SCR") {
+TEST_CASE("far behind the SCR pictures come at the shortest period and none is dropped") {
     VmpegDevice v;
-    write16(v, kFmvSysScrOffset, 0x0004);
     start_playback(v, kRate25);
     const int64_t scr = 1000000;
     zcdi_test::priv<PlayerDemux>(v).scr = scr;
     zcdi_test::priv<PlayerScrValid>(v) = true;
-    // Two pictures more than 15000 behind the SCR, then one in step.
-    zcdi_test::priv<PlayerDtsFifo>(v) = {scr - 20000, scr - 16000, scr - 1000};
-    VmpegDevice::FramePlayerStep step = v.frame_player_field(kPalFieldClocks, 3);
-    CHECK(step.skipped == 2);
-    CHECK_FALSE(step.show);
+    zcdi_test::priv<PlayerDtsFifo>(v).assign(300, scr - 20000);
+    // 7/8 of 1200000 clocks: 300 fields of 600000 hold 171 periods of 1050001.
+    CHECK(shown_fields(v, 300).size() == 171u);
+}
 
-    SUBCASE("asynchronous mode never drops") {
-        write16(v, kFmvSysScrOffset, 0x0000);
-        CHECK(v.frame_player_field(kPalFieldClocks, 3).skipped == 0);
+TEST_CASE("the period stays within 1/8 of the picture period") {
+    for (int desync : {200, -200}) {
+        CAPTURE(desync);
+        VmpegDevice v;
+        write16(v, kFmvSysScrOffset, 0x0004);
+        const uint32_t dclk = 0x100000;
+        zcdi_test::priv<PlayerFmvDclk>(v) = dclk;
+        zcdi_test::priv<PlayerDtsFifo>(v).assign(300, dts_at_desync(dclk, desync));
+        start_playback(v, kRate25);
+        zcdi_test::priv<PlayerStartSatisfied>(v) = true;  // past the start wait, whatever the DTS
+        // 200 units * 2048 clocks is far more than 1/8 of 1200000. The first
+        // picture comes after a full period, before any desync is measured.
+        const size_t shown = shown_fields(v, 300).size();
+        if (desync > 0) CHECK(shown == 171u);  // then periods of 1050001
+        else CHECK(shown == 133u);             // then periods of 1350001
     }
+}
+
+TEST_CASE("a measured desync holds for 3 pictures without a timestamp") {
+    VmpegDevice v;
+    write16(v, kFmvSysScrOffset, 0x0004);
+    const uint32_t dclk = 0x100000;
+    zcdi_test::priv<PlayerFmvDclk>(v) = dclk;
+    // No Decoder On: no 90 kHz period, so no predicted DTS.
+    zcdi_test::priv<PlayerDtsFifo>(v) = {dts_at_desync(dclk, 20), 0, 0, 0, 0, 0};
+    start_playback(v, kRate25);
+    std::vector<int> desyncs = shown_desyncs(v, 5);
+    REQUIRE(desyncs.size() == 5u);
+    CHECK(desyncs[0] != 0);
+    for (int i = 1; i <= 3; ++i) CHECK(desyncs[size_t(i)] == desyncs[0]);
+    CHECK(desyncs[4] == 0);
+}
+
+TEST_CASE("a picture without a timestamp syncs to the last DTS plus a picture period") {
+    auto second_desync = [](bool second_has_dts) {
+        VmpegDevice v;
+        write16(v, kFmvSyscmdOffset, 0x1000);  // Decoder On: the 90 kHz period counts
+        write16(v, kFmvSysScrOffset, 0x0004);
+        const uint32_t dclk = 0x100000;
+        zcdi_test::priv<PlayerFmvDclk>(v) = dclk;
+        const int64_t first = dts_at_desync(dclk, 20);
+        zcdi_test::priv<PlayerDtsFifo>(v) = {first, second_has_dts ? first + 3600 : 0, 0};
+        start_playback(v, kRate25);
+        return shown_desyncs(v, 2);
+    };
+    const std::vector<int> predicted = second_desync(false);
+    REQUIRE(predicted.size() == 2u);
+    CHECK(predicted == second_desync(true));
+}
+
+TEST_CASE("slow motion doesn't sync to the DTS") {
+    VmpegDevice v;
+    write16(v, kFmvSysScrOffset, 0x0004);
+    write16(v, kFmvSyscmdOffset, 0x0008 | 1);  // Play at half speed
+    const uint32_t dclk = 0x100000;
+    zcdi_test::priv<PlayerFmvDclk>(v) = dclk;
+    zcdi_test::priv<PlayerDtsFifo>(v).assign(300, dts_at_desync(dclk, 20));
+    start_playback(v, kRate25);
+    CHECK(shown_fields(v, 40).size() == 10u);  // every 4th PAL field, no shortening
 }
 
 }  // TEST_SUITE

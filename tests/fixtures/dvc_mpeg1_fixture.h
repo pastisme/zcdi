@@ -1,6 +1,7 @@
 // 16x16 all-intra MPEG-1 ES:
 //   ffmpeg -f lavfi -i "testsrc2=s=16x16:d=0.32:r=25,format=yuv420p" -c:v mpeg1video -g 1 -bf 0 -f mpeg1video test8frames.m1v
-// DvcVideo outputs only 6 of the 8 pictures (no sequence end code).
+// DvcVideo outputs 7 of the 8: each sequence header ends the previous one (pl_mpeg.h),
+// the last waits for a start code.
 // kDvcMpeg1StallSafePrefixByteCount bytes give one decode, then a stall.
 #pragma once
 #include <cstddef>
@@ -179,9 +180,9 @@ inline const uint8_t kDvcMpeg1FixtureBytes[] = {
 };
 
 inline constexpr size_t kDvcMpeg1FixtureSize = sizeof(kDvcMpeg1FixtureBytes);
-inline constexpr int kDvcMpeg1FrameCount = 6;
+inline constexpr int kDvcMpeg1FrameCount = 7;
 inline constexpr int kDvcMpeg1Width = 16;
 inline constexpr int kDvcMpeg1Height = 16;
-inline constexpr size_t kDvcMpeg1StallSafePrefixByteCount = 700;
+inline constexpr size_t kDvcMpeg1StallSafePrefixByteCount = 500;
 
 }  // namespace zcdi_test

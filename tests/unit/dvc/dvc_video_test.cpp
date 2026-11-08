@@ -56,17 +56,38 @@ TEST_CASE("queued pictures show in order with no drops") {
     DvcVideo v;
     feed_all(v);
 
+    // Decoding stops at the queue limit; showing one lets it go on.
     int decoded_count = 0;
-    while (v.decode_frame()) ++decoded_count;
+    std::vector<uint32_t> timecodes;  // one GOP per picture, time codes 00:00:00:k
+    for (;;) {
+        while (v.decode_frame()) ++decoded_count;
+        CHECK(v.queue_depth() <= DvcVideo::kOutputFifoPictures);
+        if (!v.present_next_frame()) break;
+        timecodes.push_back(v.presented_timecode());
+    }
     CHECK(decoded_count == kDvcMpeg1FrameCount);
-    CHECK(v.queue_depth() == size_t(kDvcMpeg1FrameCount));
-
-    // One GOP per picture, time codes 00:00:00:k.
-    std::vector<uint32_t> timecodes;
-    while (v.present_next_frame()) timecodes.push_back(v.presented_timecode());
     CHECK(timecodes.size() == size_t(kDvcMpeg1FrameCount));
     for (size_t i = 1; i < timecodes.size(); ++i) CHECK(timecodes[i] > timecodes[i - 1]);
     CHECK(v.queue_depth() == 0u);
+}
+
+// pl_mpeg.h plm_video_decode(): a sequence header with a reference picture held ends
+// the sequence first; only a real sequence end code raises ESI.
+TEST_CASE("a sequence header pushes the held picture out without ESI") {
+    DvcVideo v;
+    feed_all(v);
+    int shown = 0;
+    do {
+        while (v.decode_frame()) {
+        }
+    } while (v.present_next_frame() && ++shown);
+    CHECK(shown == kDvcMpeg1FrameCount);
+    CHECK_FALSE(v.consume_sequence_end());
+
+    v.feed({0x00, 0x00, 0x01, 0xb7});
+    CHECK(v.decode_frame());  // the 8th picture, ended by the real sequence end
+    CHECK(v.decoder_held_pictures() == 0);
+    CHECK(v.consume_sequence_end());
 }
 
 TEST_CASE("stall then resume presents immediately") {
@@ -297,9 +318,10 @@ TEST_CASE("GOP and SEQ flags mark the first I picture shown in each GOP") {
     DvcVideo v;
     v.feed(std::vector<uint8_t>(kClipAEs, kClipAEs + sizeof(kClipAEs)));
     std::vector<uint8_t> flagged;
-    while (v.decode_frame()) {
-    }
-    while (v.present_next_frame()) {
+    for (;;) {
+        while (v.decode_frame()) {
+        }
+        if (!v.present_next_frame()) break;
         CHECK(v.presented_starts_gop() == v.presented_starts_sequence());
         if (v.presented_starts_gop()) flagged.push_back(v.presented_video_status());
     }
@@ -360,20 +382,19 @@ TEST_CASE("program stream video follows the stream number") {
 }
 
 // seconds << 22 | pictures << 16 | hours << 6 | minutes; GOP k is 00:00:00:k.
-// The decoder time code follows decoding (mpeg_video.sv event_frame_decoded),
-// one reference picture ahead of the picture output for display.
+// The decoder time code follows decoding (mpeg_video.sv event_frame_decoded). Every
+// picture here has its own sequence header, which pushes the held one out (pl_mpeg.h),
+// so decoding is never a reference picture ahead.
 TEST_CASE("pictures carry their GOP time code") {
     DvcVideo v;
     feed_all(v);
-    bool decoder_ahead = false;
     for (uint32_t k = 0; k < uint32_t(kDvcMpeg1FrameCount); ++k) {
         REQUIRE(v.decode_frame());
-        CHECK(v.last_decoded_timecode() >= k << 16);
-        decoder_ahead |= v.last_decoded_timecode() > k << 16;
+        CHECK(v.last_decoded_timecode() == k << 16);
+        CHECK(v.decoder_held_pictures() == 0);
         REQUIRE(v.present_next_frame());
         CHECK(v.presented_timecode() == k << 16);
     }
-    CHECK(decoder_ahead);
 }
 
 // mpeg_video.sv: Decoder Off resets the decoder and reset_persistent_storage

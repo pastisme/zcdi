@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <deque>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -36,6 +37,7 @@ struct DvcVideoSaveState {
     bool picture_decoded_pending_ = false;
     int decoder_held_pictures_ = 0;
     int last_decoded_picture_rate_code_ = 0;
+    int discarded_pictures_ = 0; // decoded, never queued (push_frame() before the first I)
 
     // Decoder side, as CDi_MiSTer's sw/mpeg_video/main.c push_frame() and pl_mpeg.h track it.
     struct PictureInfo {
@@ -51,12 +53,51 @@ struct DvcVideoSaveState {
     int pictures_since_restart_ = 0;
     // A B picture right after the first I uses that I as forward reference.
     bool forward_fixup_pending_ = true;
+    // pl_mpeg.h plm_video_decode(): a sequence header pushes the held reference picture
+    // out; libmpeg2 still offers it later, then it's skipped. -1: none.
+    int pushed_reference_buffer_ = -1;
+
+    // sw/mpeg_video/main.c runs one picture at a time: decode it, then push_frame().
+    struct DecoderStep {
+        bool active = false;
+        uint32_t done_at = 0; // DCLK; event_frame_decoded
+        bool decoded = false; // a picture, not only a push (sequence header/end)
+        bool decoded_reported = false;
+        uint32_t timecode = 0;
+        int picture_rate_code = 0;
+        bool push = false;
+        bool discard = false; // push_frame() before the first I
+        bool push_blocked = false;
+        bool restart = false; // the next sequence starts afresh
+        bool end_of_data = false; // 0xB7
+        PendingPicture picture;
+    };
+    DecoderStep step_;
+    uint32_t decoder_free_at_ = 0; // DCLK the last push_frame() returned
+    bool decoder_idle_ = true; // nothing decoded since the input was cleared
+    // When each part of the input arrived (DCLK), by stream offset.
+    struct InputMark {
+        uint64_t offset = 0;
+        uint32_t time = 0;
+    };
+    std::vector<InputMark> input_marks_;
+    uint64_t input_offset_ = 0; // stream offset of the first unparsed byte
+    uint64_t picture_start_offset_ = 0;
 };
 
 class DvcVideo : private DvcVideoSaveState {
 public:
-    // Decode pauses at this many queued pictures (sw/mpeg_video/main.c > 25).
-    static constexpr size_t kMaxDecodedPictures = 26;
+    // The RTL output FIFO: sw/mpeg_video/main.c push_frame() waits while it holds more than 2.
+    static constexpr size_t kOutputFifoPictures = 3;
+    // CDi_MiSTer pl_mpeg decode time in DCLK (45 kHz) ticks: per picture, plus per KiB.
+    static constexpr uint32_t kDecodeBaseTicks = 1000;
+    static constexpr uint32_t kDecodeTicksPerKiB = 87;
+
+    // Arrival time (DCLK) of the data from byte `offset` of a feed() on.
+    struct ArrivalMark {
+        uint32_t offset = 0;
+        uint32_t time = 0;
+    };
 
     DvcVideo();
     ~DvcVideo();
@@ -65,7 +106,7 @@ public:
     DvcVideo& operator=(const DvcVideo&) = delete;
 
     // Video elementary-stream bytes (VMPEG demuxes program streams).
-    void feed(const std::vector<uint8_t>& data);
+    void feed(const std::vector<uint8_t>& data, const std::vector<ArrivalMark>& arrivals = {});
 
     // 0xB9 demuxed (mpeg_demuxer.sv event_program_end): the end once the input is decoded.
     void note_program_end() { program_end_waiting_ = true; }
@@ -77,8 +118,12 @@ public:
     // drops the picture on screen (mpeg_video.sv reset_persistent_storage).
     void decoder_off();
 
-    // Decodes and queues at most one picture.
-    bool decode_frame();
+    // Runs the decoder up to `now` (DCLK); true if a picture was queued. Without `now`,
+    // decoding takes no time and stops at the first queued picture.
+    bool decode_frame(std::optional<uint32_t> now = std::nullopt);
+
+    // After present_next_frame(): a push_frame() waiting for room completes (RTL output FIFO).
+    void resume_push(std::optional<uint32_t> now = std::nullopt);
 
     bool present_next_frame();
 
@@ -102,10 +147,14 @@ public:
     // One-shot: a picture finished decoding since the last call (the last_decoded_* values).
     bool consume_picture_decoded() { return std::exchange(picture_decoded_pending_, false); }
 
+    // Pictures decoded but not queued since the last call (sw/mpeg_video/main.c discard_picture 4).
+    int consume_discarded_pictures() { return std::exchange(discarded_pictures_, 0); }
+
     // Time codes already in the FMV register layout.
     uint32_t last_decoded_timecode() const { return last_decoded_timecode_; }
     int last_decoded_picture_rate_code() const { return last_decoded_picture_rate_code_; }
     uint32_t presented_timecode() const { return presented_.timecode; }
+    int presented_picture_rate_code() const { return presented_.picture_rate_code; }
     bool has_next_picture() const { return !queue_.empty(); }
     int next_width() const { return queue_.front().width; }
     int next_height() const { return queue_.front().height; }
@@ -113,7 +162,7 @@ public:
     // SYS_VSR
     uint8_t presented_video_status() const { return presented_.video_status; }
 
-    // 0 or 1: a reference picture decoded but not yet output (RTL: pictures_in_mpeg_decoder).
+    // Decoded but not yet pushed, held reference included (RTL: pictures_in_mpeg_decoder).
     int decoder_held_pictures() const { return decoder_held_pictures_; }
     size_t queue_depth() const { return queue_.size(); }
     // Fed but not yet parsed (mpeg_video.sv fifo_level).
@@ -128,7 +177,12 @@ private:
     // presented_ as RGBA; rebuilt on load, not saved.
     std::vector<uint8_t> rgba_;
 
-    bool output_picture(const void* fbuf);
+    bool make_pending(const void* fbuf, PendingPicture& pending);
+    void begin_step(uint32_t done_at);
+    void begin_push(const void* fbuf);
+    bool finish_step(std::optional<uint32_t> now);
+    bool parse_step(std::optional<uint32_t> now);
+    uint32_t arrival(uint64_t offset) const;
     void convert_presented();
     bool loaded() const;
 };

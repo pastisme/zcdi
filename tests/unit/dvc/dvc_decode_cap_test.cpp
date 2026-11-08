@@ -44,18 +44,18 @@ std::vector<Shown> run(bool es, int present_every, size_t* max_depth) {
 
 TEST_SUITE("dvc") {
 
-TEST_CASE("decoding pauses at kMaxDecodedPictures queued pictures") {
+TEST_CASE("decoding pauses with the RTL output FIFO full and one picture waiting") {
     for (bool es : {true, false}) {
         CAPTURE(es);
         DvcVideo v;
         feed_clip_a_three_times(v, es);
         for (int field = 0; field < 60; ++field) v.decode_frame();
-        CHECK(v.queue_depth() == DvcVideo::kMaxDecodedPictures);
+        CHECK(v.queue_depth() == DvcVideo::kOutputFifoPictures);
         CHECK_FALSE(v.decode_frame());
         // Showing one frees a slot, and decoding resumes.
         CHECK(v.present_next_frame());
         CHECK(v.decode_frame());
-        CHECK(v.queue_depth() == DvcVideo::kMaxDecodedPictures);
+        CHECK(v.queue_depth() == DvcVideo::kOutputFifoPictures);
     }
 }
 
@@ -66,7 +66,7 @@ TEST_CASE("the decoded-picture limit doesn't change what is shown") {
         const std::vector<Shown> free_running = run(es, 1, &depth_free);
         const std::vector<Shown> backlogged = run(es, 4, &depth_backlog);
         CHECK(depth_free <= 2);
-        CHECK(depth_backlog == DvcVideo::kMaxDecodedPictures);
+        CHECK(depth_backlog == DvcVideo::kOutputFifoPictures);
         // Most of the 36 pictures: the last stay buffered without an end code.
         REQUIRE(free_running.size() >= 30);
         REQUIRE(backlogged.size() == free_running.size());

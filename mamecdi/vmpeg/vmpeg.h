@@ -32,13 +32,13 @@ enum Register : uint32_t {
     kFmvImageWidth = 0x2001, // 0xe04002
     kFmvImageHeight = 0x2002, // 0xe04004
     kFmvImageRt = 0x2003, // 0xe04006
-    kFmvTimecodeHiA = 0x2004, // 0xe04008
-    kFmvTimecodeLoA = 0x2005, // 0xe0400a (vmpeg.sv comment says 0xe0400c)
+    kFmvDecoderTimecodeHi = 0x2004, // 0xe04008
+    kFmvDecoderTimecodeLo = 0x2005, // 0xe0400a (vmpeg.sv comment says 0xe0400c)
     kFmvDisplayW = 0x2029, // 0xe04052
     kFmvDisplayH = 0x202a, // 0xe04054
-    kFmvPicRt = 0x202b, // 0xe04056
-    kFmvTimecodeHiB = 0x202c, // 0xe04058
-    kFmvTimecodeLoB = 0x202d, // 0xe0405a
+    kFmvPicRt = 0x202b, // 0xe04056, displayed picture
+    kFmvDisplayTimecodeHi = 0x202c, // 0xe04058, fmvdrv MV_Info time code
+    kFmvDisplayTimecodeLo = 0x202d, // 0xe0405a
     kFmvTempref = 0x202e, // 0xe0405c
     kFmvSysSts = 0x202f, // 0xe0405e
     kFmvIer = 0x2030, // 0xe04060
@@ -124,6 +124,9 @@ enum InterruptBit : uint16_t {
     kIntErdv = 1u << 15,
 };
 
+// GEN_DEC_CMD bits Play sets and Decoder Off clears (vmpeg.sv, 5 = RUN_RYTHM).
+constexpr uint16_t kDecCmdRunning = 0x0062;
+
 // FMV_SYSCMD (vmpeg.sv:836-949).
 enum SysCmd : uint16_t {
     kSysCmdSlowMotion = 0x0007, // period x (n + 1)
@@ -150,8 +153,8 @@ enum VidCmd : uint16_t {
 constexpr uint16_t kSysScrSynchronous = 0x0004; // SYSSCR: display follows the DTS
 constexpr uint16_t kSysStsFifoNotFull = 0x2000;
 constexpr uint16_t kVdiTimestampUpdated = 0x4000; // GEN_VDI_CMD bit 14 (vmpeg.sv:660)
-// mpeg_video.sv fifo_full: input FIFO level over this many bytes.
-constexpr uint32_t kFmvInputFifoFullBytes = 28000;
+// mpeg_video.sv fifo_full: input FIFO (64 KB) level over this many bytes.
+constexpr uint32_t kFmvInputFifoFullBytes = 62000;
 
 // GEN_DISPLAY_RATE (vmpeg.sv kDisplayRate_PAL/NTSC).
 enum DisplayRate : uint16_t {
@@ -168,6 +171,7 @@ constexpr uint32_t kStartCodePrefixMask = 0xffffff00;
 enum StartCode : uint8_t {
     kPictureStart = 0x00,
     kSequenceHeader = 0xb3,
+    kSequenceEnd = 0xb7,
     kProgramEnd = 0xb9, // ISO 11172 end code
     kPackStart = 0xba,
     kSystemHeader = 0xbb, // this and above carry a 16-bit length
@@ -225,6 +229,26 @@ struct PsDemux {
     int64_t timestamp() const;
 };
 
+// One set of FMV window registers, named as vmpeg.sv latches them (display_offset_y holds SCRPOS X).
+struct FmvWindow {
+    uint16_t display_offset_y = 0, display_offset_x = 0;
+    uint16_t window_offset_y = 0, window_offset_x = 0;
+    uint16_t width = 0, height = 0;
+};
+
+// vmpeg.sv (a59880a): RegsUpd taken at vsync, on its way to the latched window.
+struct FmvWindowUpdate {
+    bool late = false; // written after the window started scanning out
+    // A non-scroll update waiting for a picture (next_window_*).
+    FmvWindow next;
+    bool next_pending = false;
+    bool next_late = false;
+    // A late update, held for the picture after (deferred_window).
+    FmvWindow deferred;
+    bool deferred_pending = false;
+    bool last_picture_held = false; // EOD shown, no picture follows
+};
+
 struct VmpegSaveState {
     // FMA, 0xe03000-0xe03024
     uint16_t fma_command_register_ = 0;
@@ -267,7 +291,6 @@ struct VmpegSaveState {
     uint16_t fmv_interrupt_status_register_ = 0;
     uint16_t fmv_interrupt_enable_register_ = 0;
     uint16_t fmv_interrupt_vector_register_ = 0;
-    uint16_t fmv_frame_rate_ = 0; // GEN_FRAME_RATE, 0xe040ac
     uint16_t fmv_timer_compare_register_ = 56 - 1; // TCNT, reset value
     uint32_t timer_cnt_ = 0; // 21 bits
     uint16_t fmv_decoder_command_ = 0; // GEN_DEC_CMD, 0xe04088
@@ -276,16 +299,24 @@ struct VmpegSaveState {
     bool fmv_decoder_active_ = false; // Play to Stop/Decoder Off (vmpeg.sv:944)
     uint16_t display_width_ = 0, display_height_ = 0; // last picture shown
     uint16_t decoder_frameperiod_90khz_ = 0;
-    uint8_t decoder_frameperiod_rawhdr_ = 0;
-    int fmv_decoder_held_pictures_ = 0;
+    uint8_t display_frameperiod_rawhdr_ = 0; // Pic Rt of the picture shown
+    uint8_t fmv_pictures_received_ = 0; // since Decoder On/Clear FIFO, 7 bits (pictures_in_input_fifo_no_discard)
     uint32_t fmv_decoder_input_bytes_ = 0; // handed to the decoder, not yet parsed
     bool fmv_dts_start_satisfied_ = false; // display_dts_desync_satisfied_latch
     int64_t player_frame_cnt_ = 0;
     bool player_latch_pending_ = false;
     int player_desync_q_ = 0;
+    uint8_t player_desync_hold_ = 0; // keep_synchronizer_cnt
+    int64_t player_predicted_dts_ = 0; // predicted_dts, 90 kHz
+    bool player_predicted_dts_valid_ = false;
     uint32_t player_frame_period_ = 1200000;
     uint8_t fmv_slow_motion_ = 0; // SYSCMD bits 2-0; period x (n + 1)
     bool player_step_latch_ = false; // single_step_latch
+    bool player_playback_active_delayed_ = false; // playback_active_delayed
+    bool ndat_armed_ = false; // event_buffer_underflow_armed
+    bool ndat_line_pending_ = false; // NDAT waits for line 11
+    // PIC/GOP/SEQ/EOD/NDAT of the picture selected at vsync, raised when vertical blanking ends.
+    uint16_t fmv_display_events_pending_ = 0;
 
     // FMV program-stream demuxer and the DTS of pictures not yet shown.
     enum : uint8_t {
@@ -296,8 +327,12 @@ struct VmpegSaveState {
     uint8_t fmv_demux_mode_ = kDemuxModeUnknown;
     PsDemux fmv_demux_;
     uint32_t fmv_es_shift_ = 0xffffffff;
+    // The decoder has a sequence header: pictures before one are discarded (pl_mpeg.h discard_picture 2/3).
+    bool fmv_es_has_sequence_header_ = false;
     int64_t fmv_demuxer_dts_ = 0; // 33-bit, 90 kHz
     bool fmv_demux_scr_valid_ = false;
+    // dclk ticks until fmv_dclk_ takes the last pack's SCR; 0 = none pending (vmpeg.sv scr_update_request_cnt).
+    uint8_t fmv_scr_load_countdown_ = 0;
     int64_t fmv_next_picture_dts_ = 0;
     static constexpr size_t kDtsFifoDepth = 127; // 7-bit count, mpeg_video.sv
     static constexpr size_t kMaxFmaPsSniffBytes = 64 * 2324; // ~64 Form-2 sectors
@@ -310,11 +345,12 @@ struct VmpegSaveState {
     uint16_t video_ctrl_y_display_ = 0, video_ctrl_x_display_ = 0;
     uint16_t video_ctrl_window_width_ = 0, video_ctrl_window_height_ = 0;
     uint16_t video_ctrl_decoder_offset_y_ = 0, video_ctrl_decoder_offset_x_ = 0;
-    uint16_t latched_display_offset_x_ = 0, latched_display_offset_y_ = 0;
-    uint16_t latched_window_offset_x_ = 0, latched_window_offset_y_ = 0;
-    uint16_t latched_window_width_ = 0, latched_window_height_ = 0;
+    FmvWindow latched_window_; // what display_window() reports
     bool register_update_latch_ = false;
     bool register_update_scroll_ = false;
+    FmvWindowUpdate window_update_;
+    int fmv_line_ = 0; // line of the field being drawn
+    int fmv_first_active_line_ = 26, fmv_active_lines_ = 280;
 
     // Host interface: DMA routing, XFER FIFOs, MPEG RAM enable, pending resets.
     bool vcd_pixel_clock_ = false; // write-only register, 0xe01xxx
@@ -333,6 +369,12 @@ struct VmpegSaveState {
     uint8_t fmv_xfer_pending_high_ = 0; // latched high byte of an in-progress 16-bit XFER write
     // Demuxed elementary streams for the decoders (mpeg_packet_body bytes, vmpeg.sv:89/150).
     std::vector<uint8_t> fmv_es_bytes_;
+    // fma_dclk_ when the bytes from fmv_es_bytes_[offset] on arrived.
+    struct EsArrival {
+        uint32_t offset = 0;
+        uint32_t time = 0;
+    };
+    std::vector<EsArrival> fmv_es_arrivals_;
     std::vector<uint8_t> fma_es_bytes_;
     std::vector<uint8_t> fma_sniff_bytes_; // input kept until PS or ES is decided
     bool fmv_program_end_pending_ = false;
@@ -356,6 +398,8 @@ public:
 
     // One call per field.
     void notify_vsync();
+    // After each line; `active_lines` follow `first_active_line`.
+    void notify_line(int line, int first_active_line, int active_lines);
 
     bool irq_asserted() const;
     int iack_vector() const;
@@ -365,12 +409,13 @@ public:
     uint16_t fmv_pictures_in_fifo() const;
     uint16_t fmv_dts_register() const { return uint16_t(fmv_demuxer_dts_ >> 7) & 0x7fff; }
 
-    // Also commits a pending non-scroll RegsUpd.
+    // PIC, raised when vertical blanking ends (notify_line).
     void set_video_frame_ready(int width, int height);
     void set_video_frame_decoded(int picture_rate_code);
     // IMGSZ: the picture shown next, once playing (mv_trigger() NIS timing).
     void set_next_picture(int width, int height, int picture_rate_code);
-    void set_video_buffer_underflow();
+    // NDAT once per play, before the last picture's PIC (mpeg_video.sv 9690753).
+    void check_buffer_underflow(size_t output_pictures, int decoder_pictures);
 
     void set_video_gop_start();
     void set_video_sequence_start();
@@ -389,24 +434,25 @@ public:
     void set_video_program_end();
     void set_video_last_picture();
     void set_audio_program_end();
-    void set_decoder_held_pictures(int count) { fmv_decoder_held_pictures_ = count; }
     void set_decoder_input_bytes(size_t bytes) { fmv_decoder_input_bytes_ = uint32_t(bytes); }
-    // mpeg_video.sv fifo_full: input FIFO level over 28000 bytes.
+    // mpeg_video.sv fifo_full: input FIFO level over kFmvInputFifoFullBytes.
     bool fmv_input_fifo_full() const;
 
     bool video_display_enabled();
     void note_picture_displayed();
+    // A decoded picture that won't be shown (mpeg_video.sv discard_picture_after_decoder).
+    void note_picture_discarded();
 
     struct FramePlayerStep {
-        int skipped = 0;
         bool show = false;
     };
-    // `field_clocks` in 30 MHz clocks; skipped pictures come before the shown one.
+    // `field_clocks` in 30 MHz clocks.
     FramePlayerStep frame_player_field(uint32_t field_clocks, size_t pictures_ready);
 
     void set_video_decoder_timecode(uint32_t timecode);
     void set_video_display_timecode(uint32_t timecode);
     void set_video_display_status(uint8_t status);
+    void set_video_display_picture_rate(int picture_rate_code);
 
     struct DisplayWindow {
         uint16_t scrpos_x = 0, scrpos_y = 0;
@@ -429,6 +475,10 @@ public:
 
     // Elementary-stream bytes for the video and audio decoders.
     std::vector<uint8_t> drain_fmv_es_bytes();
+    // When the bytes of the next drain_fmv_es_bytes() arrived; call first.
+    std::vector<EsArrival> drain_fmv_es_arrivals() { return std::exchange(fmv_es_arrivals_, {}); }
+    // Free-running ~45 kHz clock (never loaded).
+    uint32_t free_running_dclk() const { return fma_dclk_; }
     std::vector<uint8_t> drain_fma_es_bytes();
 
     // One-shot: vmpeg::kProgramEnd demuxed on the FMV channel (EII is already raised).
@@ -450,6 +500,9 @@ public:
 
 private:
     uint16_t read_word(uint32_t word_index) const;
+    uint16_t fmv_display_rate() const {
+        return video_standard_ == VideoStandard::kPal ? vmpeg::kDisplayRatePal : vmpeg::kDisplayRateNtsc;
+    }
     // Side effects run only when `completing` (the low byte of a 16-bit write).
     void write_word(uint32_t word_index, uint16_t value, bool completing);
     void handle_fmv_syscmd_write(uint16_t value);
@@ -462,11 +515,21 @@ private:
     void reset_fma_playback_timer();
     void fmv_demux_byte(uint8_t b);
     void fmv_es_byte(uint8_t b);
+    // Per ES byte, so inline: a new mark only when the clock has moved.
+    void note_fmv_es_arrival() {
+        if (fmv_es_arrivals_.empty() || fmv_es_arrivals_.back().time != fma_dclk_) {
+            fmv_es_arrivals_.push_back({uint32_t(fmv_es_bytes_.size()), fma_dclk_});
+        }
+    }
     void reset_fmv_demux();
     // What Clear FIFO and Decoder off both reset (mpeg_video.sv:385, :863-865, :1006).
     void reset_fmv_pipeline();
-    void commit_register_update();
-    void potential_picture_starts_display();
+    FmvWindow live_window() const;
+    // vmpeg.sv: pending window updates at a picture selected for display, or none.
+    void apply_window_updates(bool picture_selected);
+    bool in_vertical_blank() const;
+    bool window_scan_started() const;
+    void update_player_desync(uint32_t dclk, bool synchronous);
 
     VideoStandard video_standard_ = VideoStandard::kNtsc; // configuration, not saved
 };
