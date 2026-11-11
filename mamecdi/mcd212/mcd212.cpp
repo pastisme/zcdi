@@ -1014,8 +1014,18 @@ void Mcd212::overlay_dvc_frame() {
             return (uint32_t(p[0]) << 16) | (uint32_t(p[1]) << 8) | uint32_t(p[2]);
         };
         if (vcd) {
+            const uint32_t lead = dvc_scrpos_x_ == 0 ? 0 : pixel(0);
+            auto sample = [&](int t) { return t < 0 ? lead : pixel(std::size_t(t) * 231 / 1024); };
             for (int c = 0; c < columns; ++c) {
-                if (vsd[c]) out[c] = pixel(std::size_t(c * 231 / 512));
+                if (!vsd[c]) continue;
+                uint32_t r = 0, g = 0, b = 0;
+                for (int t = 2 * c - 3; t <= 2 * c; ++t) {
+                    const uint32_t p = sample(t);
+                    r += (p >> 16) & 0xff;
+                    g += (p >> 8) & 0xff;
+                    b += p & 0xff;
+                }
+                out[c] = ((r / 4) << 16) | ((g / 4) << 8) | (b / 4);
             }
             continue;
         }

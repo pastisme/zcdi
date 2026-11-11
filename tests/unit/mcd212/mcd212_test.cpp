@@ -257,6 +257,39 @@ TEST_CASE("DVC video needs a latched window and Show") {
     CHECK(pixel(32, 16, true, 2 * 10, 20, /*attached=*/false) == kBackdropRed);
 }
 
+// frameplayer.sv: with the VCD pixel clock each output tick averages its sample
+// and the 3 before; the line starts from black, a window further right from its
+// first pixel.
+TEST_CASE("VCD pixel clock video is averaged over 4 ticks") {
+    static uint8_t planes[2][0x80000] = {};
+    static uint8_t video[32 * 16 * 4];
+    auto fill = [&](bool step) {  // grey 200, or 0 left of pixel 16 with step
+        for (std::size_t i = 0; i < sizeof(video); i += 4) {
+            const uint8_t v = (step && (i / 4) % 32 < 16) ? 0 : 200;
+            video[i] = v; video[i + 1] = v; video[i + 2] = v; video[i + 3] = 0xff;
+        }
+    };
+    auto column = [&](uint16_t scrpos_x, int c) {
+        Mcd212 mcd;
+        mcd.set_dvc_attached(true);
+        mcd.set_dvc_frame(video, 32, 16);
+        mcd.set_dvc_window(scrpos_x, 20, 32, 16, 0, 0, /*show=*/true, /*vcd_pixel_clock=*/true);
+        priv<IcmEv>(mcd) = true;
+        zcdi_test::run_field(mcd, planes[0], planes[1], sizeof(planes[0]));
+        return fb_at(mcd, 2 * scrpos_x + c, 20);
+    };
+    // Sample 16 starts at tick 71 (71 * 231 / 1024); column c ends at tick 2c.
+    fill(/*step=*/true);
+    CHECK(column(10, 35) == 0x00000000u);
+    CHECK(column(10, 36) == 0x00646464u);  // ticks 69-72: two of each
+    CHECK(column(10, 37) == 0x00c8c8c8u);
+    fill(/*step=*/false);
+    CHECK(column(0, 0) == 0x00323232u);   // ticks -3..0: three black
+    CHECK(column(0, 1) == 0x00969696u);
+    CHECK(column(0, 2) == 0x00c8c8c8u);
+    CHECK(column(10, 0) == 0x00c8c8c8u);  // offset wait holds the first pixel
+}
+
 // mcd212.sv starts every pixel from the backdrop, mixing or not.
 TEST_CASE("mixing with both planes transparent shows the backdrop") {
     Mcd212 mcd;
