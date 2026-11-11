@@ -305,6 +305,7 @@ public:
 
     void raw(const void* p, size_t n) {
         if (n == 0) return; // an empty vector's data() may be null, even for memcpy
+        if (spans_) spans_->push_back({size(), n});
         const uint8_t* b = static_cast<const uint8_t*>(p);
         if (out_) {
             out_->insert(out_->end(), b, b + n);
@@ -320,6 +321,13 @@ public:
     }
 
     size_t size() const { return out_ ? out_->size() : pos_; }
+
+    // Each write as {offset, length}: one per scalar or raw array, for fuzzing.
+    struct Span {
+        size_t offset = 0;
+        size_t length = 0;
+    };
+    void log_spans(std::vector<Span>* spans) { spans_ = spans; }
 
     void begin_section(uint32_t tag) {
         io(tag);
@@ -350,6 +358,7 @@ private:
     bool counting_ = false;
     bool overflow_ = false;
     std::vector<size_t> section_starts_;
+    std::vector<Span>* spans_ = nullptr;
 };
 
 class StateReader : public StateArchiveBase<StateReader> {

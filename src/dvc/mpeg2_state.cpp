@@ -152,7 +152,10 @@ void mpeg2_state_io(T& archive, mpeg2dec_t* dec) {
     if constexpr (T::kLoading) archive.check(zcdi_mpeg2_set_action(dec, action) != 0);
     int32_t state = int32_t(dec->state);
     archive.io(state);
-    if constexpr (T::kLoading) dec->state = mpeg2_state_t(state);
+    if constexpr (T::kLoading) {
+        archive.check(state >= STATE_BUFFER && state <= STATE_SEQUENCE_MODIFIED);
+        if (!archive.failed()) dec->state = mpeg2_state_t(state);
+    }
     archive.io(dec->ext_state);
 
     // Offsets into the chunk buffer; NULL until the first header search.
@@ -173,8 +176,12 @@ void mpeg2_state_io(T& archive, mpeg2dec_t* dec) {
     archive.io(dec->code);
 
     archive.io(dec->first);
-    archive.io(dec->alloc_index);
-    if constexpr (T::kLoading) archive.check(dec->alloc_index >= 0 && dec->alloc_index <= 3);
+    // Stored only once valid: mpeg2_close() frees fbuf_alloc[0..alloc_index), even after a failed load.
+    int alloc_index = dec->alloc_index;
+    archive.io(alloc_index);
+    archive.check(alloc_index >= 0 && alloc_index <= 3);
+    if (archive.failed()) return;
+    dec->alloc_index = alloc_index;
     archive.io(dec->user_data_len);
 
     archive.io_struct(dec->new_sequence);

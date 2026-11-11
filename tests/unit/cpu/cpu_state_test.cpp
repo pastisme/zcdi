@@ -1,9 +1,11 @@
 #include "doctest.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
+#include "core/cpu/musashi_state.h"
 #include "support/cpu_fixture.h"
 #include "support/state_roundtrip.h"
 
@@ -76,6 +78,17 @@ TEST_CASE("a truncated CPU state is rejected and changes nothing") {
     std::vector<uint8_t> state = zcdi_test::save_state(f.cpu);
     const std::vector<uint8_t> before = state;
     state.pop_back();
+    CHECK(!zcdi_test::load_state(f.cpu, state));
+    CHECK(zcdi_test::save_state(f.cpu) == before);
+}
+
+TEST_CASE("a CPU state with a flag Musashi indexes by out of range is rejected") {
+    CpuFixture f;
+    f.code({0x60fe});
+    f.reset_and_run(100);
+    std::vector<uint8_t> state = zcdi_test::save_state(f.cpu);
+    const std::vector<uint8_t> before = state;
+    state[8 + offsetof(ZcdiM68kState, s_flag)] = 1;  // after the section tag and length
     CHECK(!zcdi_test::load_state(f.cpu, state));
     CHECK(zcdi_test::save_state(f.cpu) == before);
 }

@@ -53,6 +53,18 @@ int MusashiCore::int_ack(int level) {
 
 void MusashiCore::reset() { m68k_pulse_reset(); }
 int MusashiCore::run(int cycles) { return m68k_execute(cycles); }
+
+namespace {
+// Values Musashi's own setters produce (m68ki_set_sr, m68k_set_irq); several index tables.
+bool cpu_state_valid(const ZcdiM68kState& s) {
+    auto level = [](uint32_t v) { return (v & ~0x0700u) == 0; };
+    return (s.s_flag == 0 || s.s_flag == 4) && (s.m_flag == 0 || s.m_flag == 2) && (s.t1_flag & ~0x8000u) == 0 &&
+           (s.t0_flag & ~0x4000u) == 0 && level(s.int_mask) && level(s.int_level) && s.ir <= 0xffff && s.sfc <= 7 &&
+           s.dfc <= 7 && s.stopped <= 3 && s.run_mode <= 2 && (s.instr_mode == 0 || s.instr_mode == 8) &&
+           s.reset_cycles <= 0xffff;
+}
+} // namespace
+
 template <class T>
 void MusashiCore::state_io(T& archive) {
     ZcdiM68kState st{};
@@ -61,6 +73,7 @@ void MusashiCore::state_io(T& archive) {
     archive.io_struct(st);
     archive.end_section();
     if constexpr (T::kLoading) {
+        archive.check(cpu_state_valid(st));
         if (!archive.failed()) zcdi_m68k_state_set(&st);
     }
 }
