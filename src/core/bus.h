@@ -36,6 +36,10 @@ struct BusSaveState {
 
     // FMA underflow is only reported once a DMA has fed the FMA.
     bool fma_dma_seen_ = false;
+
+    bool state_valid() const {
+        return in4_owner_ == In4Owner::kIdle || in4_owner_ == In4Owner::kCdic || in4_owner_ == In4Owner::kVmpeg;
+    }
 };
 
 class Bus : private BusSaveState {

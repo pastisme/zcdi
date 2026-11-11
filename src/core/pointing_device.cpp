@@ -22,14 +22,14 @@ void PointingDevice::state_io(T& archive) {
     archive.begin_section(state_tag("PDEV"));
     archive.io_struct(static_cast<PointingDeviceSaveState&>(*this));
     archive.end_section();
-    if constexpr (T::kLoading) {
-        // packet_pos_ is stale once a packet is out; it's only read while sending.
-        archive.check(state_ <= kSending && packet_len_ <= sizeof(packet_) &&
-                      (state_ != kSending || packet_pos_ < packet_len_));
-        archive.check(accel_ >= 0 && accel_ <= 7);
-    }
 }
 ZCDI_STATE_IO_INSTANTIATE(PointingDevice);
+
+bool PointingDeviceSaveState::state_valid() const {
+    // packet_pos_ is stale once a packet is out; it's only read while sending.
+    return state_ <= kSending && packet_len_ <= sizeof(packet_) && (state_ != kSending || packet_pos_ < packet_len_) &&
+           accel_ >= 0 && accel_ <= 7;
+}
 
 void PointingDevice::set_input(const Input& input) {
     input_ = input;

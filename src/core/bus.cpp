@@ -171,7 +171,6 @@ void Bus::state_io(T& archive) {
 
     ram_state_io(archive);
     archive.io_struct(static_cast<BusSaveState&>(*this));
-    archive.check(in4_owner_ == In4Owner::kIdle || in4_owner_ == In4Owner::kCdic || in4_owner_ == In4Owner::kVmpeg);
 
     archive.end_section();
 

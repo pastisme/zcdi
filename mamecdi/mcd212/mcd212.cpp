@@ -89,18 +89,19 @@ void Mcd212::state_io(T& archive) {
         }
     }
     archive.end_section();
-    if constexpr (T::kLoading) archive.check(loaded());
+    if constexpr (T::kLoading) rebuild_after_load();
 }
 ZCDI_STATE_IO_INSTANTIATE(Mcd212);
 
+bool Mcd212SaveState::state_valid() const { return clut_bank_[0] <= 3 && clut_bank_[1] <= 3; }
+
 // fb_ and backdrop_mask_ aren't saved: every field rewrites every line.
-bool Mcd212::loaded() {
+void Mcd212::rebuild_after_load() {
     std::fill(fb_.begin(), fb_.end(), 0u);
     if (!woven_last_) std::fill(out_.begin(), out_.end(), 0u);
     std::fill(backdrop_mask_.begin(), backdrop_mask_.end(), uint8_t{0});
     dvc_frame_ = nullptr;
     region_arrays_dirty_ = true; // rebuilt from the loaded Region Control
-    return clut_bank_[0] <= 3 && clut_bank_[1] <= 3;
 }
 
 uint8_t Mcd212::read_byte(uint32_t offset) {

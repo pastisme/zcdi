@@ -252,6 +252,8 @@ struct Mcd212SaveState {
     bool irq1_ = false;
     // Interlace (DCR1.SM): video_timing.sv parity == 0, the field after an odd one.
     bool even_field_ = false;
+
+    bool state_valid() const;
 };
 
 class Mcd212 : private Mcd212SaveState {
@@ -432,7 +434,7 @@ private:
     // Bytes, not vector<bool>: written for every pixel.
     std::vector<uint8_t> backdrop_mask_;
 
-    bool loaded();
+    void rebuild_after_load();
 };
 
 } // namespace mamecdi

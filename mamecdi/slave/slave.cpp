@@ -52,12 +52,11 @@ void SlaveHle::state_io(T& archive) {
     archive.begin_section(state_tag("SLAV"));
     archive.io_struct(static_cast<SlaveSaveState&>(*this));
     archive.end_section();
-    if constexpr (T::kLoading) archive.check(loaded());
+    if constexpr (T::kLoading) reset_dac_window();
 }
 ZCDI_STATE_IO_INSTANTIATE(SlaveHle);
 
-bool SlaveHle::loaded() {
-    reset_dac_window();
+bool SlaveSaveState::state_valid() const {
     for (const Channel& c : channels_) {
         if (c.in_len < 0 || c.in_len > int(sizeof(c.in))) return false;
         if (c.out_len < 0 || c.out_len > int(sizeof(c.out))) return false;

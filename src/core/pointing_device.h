@@ -37,6 +37,8 @@ struct PointingDeviceSaveState {
     bool in_area_q_ = false;
     int accel_ = 0; // 0-7
     int mouse_acc_x_ = 0, mouse_acc_y_ = 0;
+
+    bool state_valid() const;
 };
 
 class PointingDevice : private PointingDeviceSaveState {

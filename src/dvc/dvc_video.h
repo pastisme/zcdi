@@ -83,6 +83,8 @@ struct DvcVideoSaveState {
     std::vector<InputMark> input_marks_;
     uint64_t input_offset_ = 0; // stream offset of the first unparsed byte
     uint64_t picture_start_offset_ = 0;
+
+    bool state_valid() const;
 };
 
 class DvcVideo : private DvcVideoSaveState {
@@ -184,7 +186,6 @@ private:
     bool parse_step(std::optional<uint32_t> now);
     uint32_t arrival(uint64_t offset) const;
     void convert_presented();
-    bool loaded() const;
 };
 
 } // namespace dvc

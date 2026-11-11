@@ -141,6 +141,8 @@ struct SlaveSaveState {
     uint8_t tray_state_ = slave::kTrayClosed; // slave::TrayState
 
     // SLAVE firmware 2.0 audio attenuation; comments give each field's RAM location.
+    // 0.5 MHz counter (CDi_MiSTer uc_68hc05.sv); its high byte $1a ticks every 512 us.
+    static constexpr int kTimerTickCycles = int(int64_t(kCpuClockHz) * 256 / 500000);
     int timer_cycle_accum_ = 0;
     uint8_t timer_high_ = 0; // $1a
     uint8_t att_command_ = 0xf5; // $75: power-on mutes both cross paths
@@ -176,6 +178,8 @@ struct SlaveSaveState {
     uint8_t buttons_ = 0; // $5e
     Pc6 pc6_ = Pc6::kReleased;
     uint8_t pc6_ticks_ = 0; // $ba
+
+    bool state_valid() const;
 };
 
 class SlaveHle : private SlaveSaveState {
@@ -257,8 +261,6 @@ private:
     uint8_t fade_gain() const;
     uint8_t dac_code(uint8_t db, bool forced_mute) const;
 
-    // 0.5 MHz counter (CDi_MiSTer uc_68hc05.sv); its high byte $1a ticks every 512 us.
-    static constexpr int kTimerTickCycles = int(int64_t(kCpuClockHz) * 256 / 500000);
     // Not saved: the window is empty between frames.
     struct DacChange {
         int64_t cycle = 0;
@@ -278,7 +280,6 @@ private:
     void relative_byte(uint8_t v);
     void absolute_byte(uint8_t v);
     void publish_pointer(); // 0xe0d
-    bool loaded(); // checks and rebuilds what a load can't carry
 };
 
 } // namespace mamecdi

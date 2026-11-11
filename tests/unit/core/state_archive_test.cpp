@@ -157,6 +157,45 @@ TEST_CASE("io_struct rejects a container count larger than the data left") {
     CHECK(rd.failed());
 }
 
+namespace {
+struct Ring {
+    uint8_t pos = 0;
+    uint8_t data[4] = {};
+    bool state_valid() const { return pos < 4; }
+};
+struct HoldsRings {
+    Ring a;
+    Ring b;
+};
+}  // namespace
+
+TEST_CASE("io_struct loads a struct's state_valid() result, nested structs included") {
+    HoldsRings h;
+    h.b.pos = 3;
+    std::vector<uint8_t> bytes;
+    StateWriter w(bytes);
+    w.io_struct(h);
+    {
+        HoldsRings back;
+        StateReader rd(bytes);
+        rd.io_struct(back);
+        CHECK(!rd.failed());
+        CHECK(back.b.pos == 3);
+    }
+    bytes[5] = 4;  // b.pos, after a's 5 bytes
+    HoldsRings back;
+    StateReader rd(bytes);
+    rd.io_struct(back);
+    CHECK(rd.failed());
+}
+
+static_assert(zcdi::state_detail::kSameWidthEverywhere<int64_t>);
+static_assert(zcdi::state_detail::kSameWidthEverywhere<uint64_t>);
+static_assert(zcdi::state_detail::kSameWidthEverywhere<Mode>);
+static_assert(!zcdi::state_detail::kSameWidthEverywhere<wchar_t>);
+static_assert(!zcdi::state_detail::kSameWidthEverywhere<long double>);
+static_assert(sizeof(long) == 8 || !zcdi::state_detail::kSameWidthEverywhere<unsigned long>);
+
 TEST_CASE("a state round-trips every field type") {
     std::vector<uint8_t> bytes = save(filled());
     Sample r;

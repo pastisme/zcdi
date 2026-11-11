@@ -21,6 +21,19 @@ namespace state_detail {
 template <class T>
 constexpr bool kScalar = std::is_arithmetic_v<T> || std::is_enum_v<T>;
 
+// long is 32-bit on Windows/wasm32/armv7 and size_t is unsigned long on wasm32, so
+// either would change the format there. Fixed-width types only; checked where long differs.
+template <class T>
+constexpr bool kSameWidthEverywhere = [] {
+    using U = std::remove_cv_t<T>;
+    if constexpr (std::is_enum_v<U>) {
+        return kSameWidthEverywhere<std::underlying_type_t<U>>;
+    } else {
+        return !std::is_same_v<U, wchar_t> && !std::is_same_v<U, long double> &&
+               (sizeof(long) == 8 || (!std::is_same_v<U, long> && !std::is_same_v<U, unsigned long>));
+    }
+}();
+
 // Scalars whose memory bytes are their state bytes on this host, so arrays
 // of them are copied whole. bool is excluded: any byte but 0/1 is UB.
 template <class T>
@@ -191,6 +204,9 @@ void io_field(A& archive, T& v) {
     } else {
         static_assert(std::is_aggregate_v<T>, "state fields: scalars, arrays, containers, structs");
         for_fields(v, [&](auto&... f) { (io_field(archive, f), ...); });
+        if constexpr (A::kLoading && requires { v.state_valid(); }) {
+            if (!archive.failed()) archive.check(v.state_valid());
+        }
     }
 }
 
@@ -235,6 +251,7 @@ public:
 
     template <class T>
     void io_span(std::span<T> s) {
+        static_assert(state_detail::kSameWidthEverywhere<T>, "use a fixed-width type");
         if constexpr (state_detail::kRawCopyable<T>) {
             self().raw(s.data(), s.size_bytes());
         } else {
@@ -260,6 +277,7 @@ public:
     template <class T>
     void io(T& v) {
         static_assert(state_detail::kScalar<T>);
+        static_assert(state_detail::kSameWidthEverywhere<T>, "use a fixed-width type");
         auto bits = state_detail::to_bits(v);
         if constexpr (std::endian::native == std::endian::little) {
             raw(&bits, sizeof(bits));
@@ -286,6 +304,7 @@ public:
     }
 
     void raw(const void* p, size_t n) {
+        if (n == 0) return; // an empty vector's data() may be null, even for memcpy
         const uint8_t* b = static_cast<const uint8_t*>(p);
         if (out_) {
             out_->insert(out_->end(), b, b + n);
@@ -342,6 +361,7 @@ public:
     template <class T>
     void io(T& v) {
         static_assert(state_detail::kScalar<T>);
+        static_assert(state_detail::kSameWidthEverywhere<T>, "use a fixed-width type");
         using Bits = decltype(state_detail::to_bits(v));
         if (!take(sizeof(Bits))) {
             v = T{};
@@ -384,6 +404,7 @@ public:
     }
 
     void raw(void* p, size_t n) {
+        if (n == 0) return;
         if (!take(n)) {
             std::memset(p, 0, n);
             return;

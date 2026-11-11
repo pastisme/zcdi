@@ -390,7 +390,6 @@ void DvcVideo::state_io(T& archive) {
     mpeg2_state_io(archive, impl_->decoder.get());
     archive.io_struct(static_cast<DvcVideoSaveState&>(*this));
     if constexpr (T::kLoading) {
-        archive.check(loaded());
         if (has_frame_ && !archive.failed()) {
             convert_presented();
         } else {
@@ -401,7 +400,7 @@ void DvcVideo::state_io(T& archive) {
 }
 ZCDI_STATE_IO_INSTANTIATE(DvcVideo);
 
-bool DvcVideo::loaded() const {
+bool DvcVideoSaveState::state_valid() const {
     auto valid = [](const PendingPicture& p) {
         return p.width >= 0 && p.height >= 0 && p.yuv.size() == yuv_size(p.width, p.height);
     };
