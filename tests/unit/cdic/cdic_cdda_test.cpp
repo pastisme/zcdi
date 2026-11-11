@@ -45,6 +45,26 @@ std::vector<uint8_t> next_subq(Cdic& cdic) {
     return {};
 }
 
+// The R..W subcode words stored with the next sector delivered.
+std::vector<uint16_t> next_subcode_rw(Cdic& cdic) {
+    for (int step = 0; step < 4000; ++step) {
+        cdic.tick_cycles(10000);
+        if (!xbuf_pending(cdic)) continue;
+        const uint32_t rw = (cdic.read_reg_byte(0x3ff) & 1) ? 0xa00u : 0u;
+        std::vector<uint16_t> out;
+        for (uint32_t i = 0; i < zcdi::kSubcodeRwSize; ++i)
+            out.push_back(uint16_t(cdic.read_ram_byte(rw + 2 * i) << 8 | cdic.read_ram_byte(rw + 2 * i + 1)));
+        return out;
+    }
+    return {};
+}
+
+std::vector<uint16_t> rw_words(int lba) {
+    std::vector<uint16_t> out;
+    for (uint32_t i = 0; i < zcdi::kSubcodeRwSize; ++i) out.push_back(uint16_t((lba + int(i)) & 0x3f));
+    return out;
+}
+
 }  // namespace
 
 TEST_SUITE("cdic") {
@@ -153,6 +173,33 @@ TEST_CASE("Play CDDA runs on into a silent lead-out, Q track AA") {
     for (uint32_t i = 0; i < 2352; ++i) silent = silent && cdic.read_ram_byte(bank + i) == 0;
     CHECK(silent);
     CHECK(next_subq(cdic) == std::vector<uint8_t>{0x01, 0xaa, 0x01, 0x00, 0x00, 0x01, 0x00, 0x02, 0x11});
+}
+
+TEST_CASE("Play CDDA stores each sector's R..W subcode in the data bank") {
+    FakeAudioCd::Options options;
+    options.subcode_rw = true;
+    FakeAudioCd disc({10}, options);
+    Cdic cdic;
+    cdic.set_disc(&disc);
+    set_time(cdic, 8);
+    write_reg16(cdic, 0x000, 0x0028);
+    write_reg16(cdic, 0x3fe, 0xc000);
+    CHECK(next_subcode_rw(cdic) == rw_words(8));
+    CHECK(next_subcode_rw(cdic) == rw_words(9));
+    CHECK(next_subcode_rw(cdic) == std::vector<uint16_t>(zcdi::kSubcodeRwSize, 0));  // lead-out
+}
+
+TEST_CASE("Fetch TOC and discs without R..W subcode store zeros there") {
+    FakeAudioCd::Options options;
+    SUBCASE("Fetch TOC") { options.subcode_rw = true; }
+    SUBCASE("no subcode") { options.subcode_rw = false; }
+    FakeAudioCd disc({10}, options);
+    Cdic cdic;
+    cdic.set_disc(&disc);
+    for (uint32_t i = 0; i < 0x1400; ++i) cdic.write_ram_byte(i, 0x55);
+    write_reg16(cdic, 0x000, options.subcode_rw ? 0x0027 : 0x0028);
+    write_reg16(cdic, 0x3fe, 0xc000);
+    CHECK(next_subcode_rw(cdic) == std::vector<uint16_t>(zcdi::kSubcodeRwSize, 0));
 }
 
 }  // TEST_SUITE

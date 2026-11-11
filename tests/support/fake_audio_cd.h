@@ -22,6 +22,7 @@ public:
     struct Options {
         bool big_endian = false;  // CHD stores CD-DA big-endian
         bool cdi_ready = false;
+        bool subcode_rw = false;  // symbol i of sector lba is (lba + i) & 0x3f
     };
 
     explicit FakeAudioCd(std::vector<int> track_sectors) : FakeAudioCd(std::move(track_sectors), Options{}) {}
@@ -60,6 +61,11 @@ public:
                 p[options_.big_endian ? 0 : 1] = uint8_t(v >> 8);
             }
         }
+        return true;
+    }
+    bool read_subcode_rw(int lba, uint8_t* out) override {
+        if (!options_.subcode_rw || lba < 0 || lba >= lead_out_) return false;
+        for (uint32_t i = 0; i < zcdi::kSubcodeRwSize; ++i) out[i] = uint8_t((lba + int(i)) & 0x3f);
         return true;
     }
     int lead_out_lba() const override { return lead_out_; }

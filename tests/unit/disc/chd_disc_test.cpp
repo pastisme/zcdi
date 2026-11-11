@@ -6,6 +6,7 @@
 
 #include "disc/chd_disc.h"
 #include "fixtures/chd_postgap_fixture.h"
+#include "fixtures/chd_subcode_rw_fixture.h"
 #include "fixtures/chd_two_track_fixture.h"
 
 using namespace zcdi;
@@ -89,6 +90,33 @@ TEST_CASE("CHD postgap sectors read as blank, not as padding or the next track")
         CHECK(s.data[0] == want);
         CHECK(s.data[kRawSectorSize - 1] == want);
     }
+}
+
+TEST_CASE("a CHD track with RW_RAW subcode gives its R..W symbols") {
+    std::unique_ptr<Disc> disc = open_chd_disc(fixture_context(zcdi_test::kChdSubcodeRwFixtureBytes));
+    REQUIRE(disc);
+    REQUIRE(disc->lead_out_lba() == 3);
+    for (int lba = 0; lba < 3; ++lba) {
+        CAPTURE(lba);
+        RawSector s{};
+        REQUIRE(disc->read_sector(lba, s));
+        CHECK(s.data[kRawSectorSize - 1] == 0x10 + lba);
+        uint8_t rw[kSubcodeRwSize] = {};
+        REQUIRE(disc->read_subcode_rw(lba, rw));
+        for (uint32_t i = 0; i < kSubcodeRwSize; ++i) {
+            CAPTURE(i);
+            CHECK(rw[i] == ((lba + int(i)) & 0x3f));  // P and Q bits dropped
+        }
+    }
+    uint8_t rw[kSubcodeRwSize] = {};
+    CHECK_FALSE(disc->read_subcode_rw(3, rw));
+}
+
+TEST_CASE("a CHD without subcode gives none") {
+    std::unique_ptr<Disc> disc = open_chd_disc(fixture_context(zcdi_test::kChdTwoTrackFixtureBytes));
+    REQUIRE(disc);
+    uint8_t rw[kSubcodeRwSize] = {};
+    CHECK_FALSE(disc->read_subcode_rw(0, rw));
 }
 
 }  // TEST_SUITE

@@ -60,6 +60,7 @@ public:
     void set_byteswap_detected(bool latched) { byteswap_latched_ = latched; }
     virtual bool cdda_big_endian() const { return false; }
     virtual std::vector<TocTrack> toc_tracks() const { return {{1, false, 0}}; }
+    virtual bool read_subcode_rw(int /*lba*/, uint8_t* /*out*/) { return false; }
 
 protected:
     // Byteswap latch, Green Book descrambling, subheader parse.

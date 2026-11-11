@@ -479,7 +479,7 @@ void Cdic::process_audio_map() {
 }
 
 // Stored raw; the ADPCM player plays it in CD-DA mode once AUDCTL starts it.
-void Cdic::pack_cdda_into_ram(const RawSector& s, const uint8_t* subq) {
+void Cdic::pack_cdda_into_ram(const RawSector& s, const uint8_t* subq, const uint8_t* subcode_rw) {
     const uint8_t* pcm = s.data;
     uint8_t swapped[kRawSectorSize];
     if (disc_ && disc_->cdda_big_endian()) {
@@ -496,6 +496,11 @@ void Cdic::pack_cdda_into_ram(const RawSector& s, const uint8_t* subq) {
     for (uint32_t i = 0; i < kSubqSize; ++i, q += 2) {
         ram_[q] = 0x00;
         ram_[q + 1] = subq[i];
+    }
+    uint32_t rw = data_bank ? kDataBank1 : kDataBank0;
+    for (uint32_t i = 0; i < kSubcodeRwSize; ++i, rw += 2) {
+        ram_[rw] = 0x00;
+        ram_[rw + 1] = subcode_rw ? subcode_rw[i] : 0x00;
     }
 }
 
@@ -534,7 +539,7 @@ void Cdic::deliver_toc_sector() {
     set_subq_crc(q);
 
     RawSector silence{};
-    pack_cdda_into_ram(silence, q);
+    pack_cdda_into_ram(silence, q, nullptr);
     signal_sector();
 }
 
@@ -565,7 +570,9 @@ bool Cdic::process_sector() {
     if (disc_command_ == kCmdPlayCdda) {
         uint8_t subq[kSubqSize];
         build_subq(curr_lba_, true, tracks_, disc_->lead_out_lba(), subq);
-        pack_cdda_into_ram(s, subq);
+        uint8_t rw[kSubcodeRwSize] = {};
+        const bool has_rw = disc_->read_subcode_rw(curr_lba_, rw);
+        pack_cdda_into_ram(s, subq, has_rw ? rw : nullptr);
         signal_sector();
         return true;
     }

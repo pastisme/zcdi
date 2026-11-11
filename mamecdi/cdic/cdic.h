@@ -186,7 +186,7 @@ private:
     bool is_mode2_sector_selected(const RawSector& s) const;
     bool is_mode2_audio_selected(const RawSector& s) const;
     void pack_into_ram(const RawSector& s);
-    void pack_cdda_into_ram(const RawSector& s, const uint8_t* subq);
+    void pack_cdda_into_ram(const RawSector& s, const uint8_t* subq, const uint8_t* subcode_rw);
     // Flips the data toggle into DBUF bit 0; true = bank 1 (cdic.sv:559-582).
     bool next_data_bank();
     // A sector is in RAM: XBUF bit 15, DBUF bit 14, IN4.

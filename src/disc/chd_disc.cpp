@@ -16,7 +16,7 @@ namespace zcdi {
 
 namespace {
 
-// 2352 sector + 96 subcode per unit; subcode isn't modelled.
+// 2352 sector + 96 subcode per unit.
 constexpr uint32_t kFrameSize = CD_FRAME_SIZE;
 
 // chdman TYPE strings that keep sync, header and XA subheader.
@@ -33,6 +33,7 @@ struct Track {
     uint32_t stored_pregap = 0; // frames before INDEX 01 (PGTYPE V...)
     int track_number = 0; // as declared in the CHD's own track metadata
     bool is_audio = false;
+    bool raw_rw = false;
 };
 
 uint64_t core_file_size_cb(void* file) { return disc_file_size(static_cast<DiscFile*>(file)); }
@@ -87,16 +88,7 @@ public:
     }
 
     bool read_sector(int lba, RawSector& out) override {
-        if (tracks_.empty() || lba < 0) return false;
-
-        const Track* t = nullptr;
-        for (size_t i = 0; i < tracks_.size(); ++i) {
-            uint32_t next_ofs = (i + 1 < tracks_.size()) ? tracks_[i + 1].logframeofs : total_logframes_;
-            if (static_cast<uint32_t>(lba) < next_ofs) {
-                t = &tracks_[i];
-                break;
-            }
-        }
+        const Track* t = find_track(lba);
         if (!t) return false;
 
         if (static_cast<uint32_t>(lba) - t->logframeofs >= t->frames) {
@@ -105,10 +97,21 @@ public:
             return true; // postgap: never stored, and may outrun chdman's padding
         }
 
-        uint32_t chd_frame = t->chdframeofs + (static_cast<uint32_t>(lba) - t->logframeofs);
-        if (!read_frame(chd_frame, out.data)) return false;
+        const uint8_t* frame = read_frame(t->chdframeofs + (static_cast<uint32_t>(lba) - t->logframeofs));
+        if (!frame) return false;
+        std::memcpy(out.data, frame, CD_MAX_SECTOR_DATA);
 
         finish_sector(lba, out);
+        return true;
+    }
+
+    bool read_subcode_rw(int lba, uint8_t* out) override {
+        const Track* t = find_track(lba);
+        if (!t || !t->raw_rw || static_cast<uint32_t>(lba) - t->logframeofs >= t->frames) return false;
+        const uint8_t* frame = read_frame(t->chdframeofs + (static_cast<uint32_t>(lba) - t->logframeofs));
+        if (!frame) return false;
+        for (uint32_t i = 0; i < kSubcodeRwSize; ++i)
+            out[i] = frame[CD_MAX_SECTOR_DATA + i] & 0x3f;
         return true;
     }
 
@@ -129,6 +132,15 @@ public:
     }
 
 private:
+    const Track* find_track(int lba) const {
+        if (lba < 0) return nullptr;
+        for (size_t i = 0; i < tracks_.size(); ++i) {
+            uint32_t next_ofs = (i + 1 < tracks_.size()) ? tracks_[i + 1].logframeofs : total_logframes_;
+            if (static_cast<uint32_t>(lba) < next_ofs) return &tracks_[i];
+        }
+        return nullptr;
+    }
+
     bool parse_tracks() {
         uint32_t log_ofs = 0, chd_ofs = 0;
 
@@ -172,6 +184,7 @@ private:
                 .stored_pregap = pgtype[0] == 'V' ? static_cast<uint32_t>(pregap) : 0u,
                 .track_number = track_num,
                 .is_audio = std::string(type) == "AUDIO",
+                .raw_rw = std::string(subtype) == "RW_RAW",
             };
 
             log_ofs += t.frames;
@@ -186,16 +199,15 @@ private:
         return !tracks_.empty();
     }
 
-    bool read_frame(uint32_t chd_frame, uint8_t* dest2352) {
+    const uint8_t* read_frame(uint32_t chd_frame) {
         uint32_t hunk = chd_frame / frames_per_hunk_;
         uint32_t frame_in_hunk = chd_frame % frames_per_hunk_;
         if (!have_cached_hunk_ || hunk != cached_hunk_) {
-            if (chd_read(chd_.get(), hunk, hunk_buf_.data()) != CHDERR_NONE) return false;
+            if (chd_read(chd_.get(), hunk, hunk_buf_.data()) != CHDERR_NONE) return nullptr;
             cached_hunk_ = hunk;
             have_cached_hunk_ = true;
         }
-        std::memcpy(dest2352, hunk_buf_.data() + static_cast<size_t>(frame_in_hunk) * kFrameSize, CD_MAX_SECTOR_DATA);
-        return true;
+        return hunk_buf_.data() + static_cast<size_t>(frame_in_hunk) * kFrameSize;
     }
 
     struct ChdCloser {

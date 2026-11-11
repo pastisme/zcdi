@@ -18,6 +18,7 @@ enum : int {
 
 // Q subcode (Red Book): 12 bytes, CRC last (same_cdi SUBCODE_Q_CONTROL..SUBCODE_Q_CRC1).
 constexpr uint32_t kSubqSize = 12;
+constexpr uint32_t kSubcodeRwSize = 96;
 // CONTROL/ADR byte: ADR 1 (position), CONTROL 4 for a data track.
 enum QControl : uint8_t {
     kQControlAudio = 0x01,
