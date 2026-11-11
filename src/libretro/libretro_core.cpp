@@ -288,7 +288,9 @@ RETRO_API bool retro_serialize(void* data, size_t len) {
 
 RETRO_API bool retro_unserialize(const void* data, size_t len) {
     if (!g_machine || !g_audio || !data) return false;
-    if (!zcdi::load_core_state(*g_machine, *g_audio, zcdi::input_history(), {static_cast<const uint8_t*>(data), len})) {
+    const bool from_this_session = zcdi::state_from_this_session(env_cb);
+    if (!zcdi::load_core_state(*g_machine, *g_audio, zcdi::input_history(), {static_cast<const uint8_t*>(data), len},
+                               from_this_session)) {
         zcdi::log_msg(RETRO_LOG_ERROR,
                       "Save state rejected: damaged, or not from this core version, BIOS, DVC ROM, options or disc\n");
         return false;

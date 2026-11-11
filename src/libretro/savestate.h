@@ -16,8 +16,9 @@ void save_core_state(Machine& machine, Mixer& audio, InputHistory& input, std::v
 size_t save_core_state(Machine& machine, Mixer& audio, InputHistory& input, std::span<uint8_t> out);
 size_t core_state_size(Machine& machine, Mixer& audio, InputHistory& input);
 
-// All or nothing: on false nothing has changed.
-bool load_core_state(Machine& machine, Mixer& audio, InputHistory& input, std::span<const uint8_t> data);
+// All or nothing: on false nothing has changed (see Machine::load_state for from_this_session).
+bool load_core_state(Machine& machine, Mixer& audio, InputHistory& input, std::span<const uint8_t> data,
+                     bool from_this_session = false);
 
 // What retro_serialize_size() reports: it may not grow during a session
 // unless the frontend re-queries (FRONT_VARIABLE_SIZE).

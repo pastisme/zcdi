@@ -31,6 +31,16 @@ std::unique_ptr<zcdi::Disc> fake_disc() {
     return std::make_unique<zcdi_test::FakeDisc>(std::vector<uint8_t>(40, zcdi_test::kSubmodeData));
 }
 
+// Breaks the MCD212 section tag: deep inside the machine, past the identity
+// checks, before NVRAM.
+void break_mcd212_tag(std::vector<uint8_t>& state) {
+    const uint8_t tag[4] = {'M', 'C', 'D', ' '};
+    size_t at = 0;
+    while (at + 4 <= state.size() && !std::equal(tag, tag + 4, state.begin() + std::ptrdiff_t(at))) ++at;
+    REQUIRE(at + 4 <= state.size());
+    state[at] ^= 0x20;
+}
+
 // Same sectors, another TOC.
 class ShorterFakeDisc : public zcdi_test::FakeDisc {
 public:
@@ -96,12 +106,7 @@ TEST_CASE("a matching state damaged past its identity checks changes nothing, NV
     std::unique_ptr<zcdi::Machine> m = build_fake_machine_with({.nvram = nvram});
     for (int i = 0; i < 3; ++i) m->run_frame();
     std::vector<uint8_t> bad = save_machine(*m);
-    // Break the MCD212 section tag, deep inside the BUS section and before NVRAM.
-    const uint8_t tag[4] = {'M', 'C', 'D', ' '};
-    size_t at = 0;
-    while (at + 4 <= bad.size() && !std::equal(tag, tag + 4, bad.begin() + std::ptrdiff_t(at))) ++at;
-    REQUIRE(at + 4 <= bad.size());
-    bad[at] ^= 0x20;
+    break_mcd212_tag(bad);
     m->run_frame();
     const std::vector<uint8_t> current = save_machine(*m);
 
@@ -110,6 +115,40 @@ TEST_CASE("a matching state damaged past its identity checks changes nothing, NV
     const std::span<const std::byte> kept = m->bus().nvram_data();
     CHECK(std::equal(kept.begin(), kept.begin() + 0x1ff0, nvram.begin()));
     m->run_frame();  // still runs
+}
+
+TEST_CASE("a state loaded without undo loads like any other") {
+    std::unique_ptr<zcdi::Machine> m = build_fake_machine();
+    for (int i = 0; i < 3; ++i) m->run_frame();
+    const std::vector<uint8_t> at_save = save_machine(*m);
+    for (int i = 0; i < 5; ++i) m->run_frame();
+    const std::vector<uint8_t> first = save_machine(*m);
+
+    zcdi::StateReader r(at_save);
+    REQUIRE(m->load_state(r, /*skip_undo=*/true));
+    CHECK(zcdi_test::first_difference(save_machine(*m), at_save) == -1);
+    for (int i = 0; i < 5; ++i) m->run_frame();
+    CHECK(zcdi_test::first_difference(save_machine(*m), first) == -1);
+}
+
+TEST_CASE("a damaged state loaded without undo cold boots, NVRAM kept") {
+    std::vector<std::byte> nvram(zcdi::mamecdi::Mk48t08::kSize);
+    for (size_t i = 0; i < 0x1ff0; ++i) nvram[i] = std::byte(i * 7);
+    std::unique_ptr<zcdi::Machine> m = build_fake_machine_with({.nvram = nvram});
+    std::vector<uint8_t> power_on = save_machine(*m);
+    for (int i = 0; i < 3; ++i) m->run_frame();
+    std::vector<uint8_t> bad = save_machine(*m);
+    break_mcd212_tag(bad);
+    m->run_frame();
+
+    zcdi::StateReader r(bad);
+    CHECK(!m->load_state(r, /*skip_undo=*/true));
+    std::vector<uint8_t> now = save_machine(*m);
+    zcdi_test::blank_section(now, "RTC ");
+    zcdi_test::blank_section(power_on, "RTC ");
+    CHECK(zcdi_test::first_difference(now, power_on) == -1);
+    const std::span<const std::byte> kept = m->bus().nvram_data();
+    CHECK(std::equal(kept.begin(), kept.begin() + 0x1ff0, nvram.begin()));
 }
 
 TEST_CASE("a machine state made with another BIOS is rejected") {

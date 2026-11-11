@@ -65,9 +65,10 @@ public:
 
     // Only between run_frame() calls. A state must match this machine's
     // BIOS, DVC ROM, options and mounted disc. A load that fails, mismatched
-    // or damaged, leaves the machine as it was.
+    // or damaged, leaves the machine as it was. `skip_undo`: for states known good (runahead);
+    // a load that fails anyway can't roll back, so the machine cold boots, NVRAM kept.
     void save_state(StateWriter& w);
-    bool load_state(StateReader& r);
+    bool load_state(StateReader& r, bool skip_undo = false);
     size_t state_size();
 
     double refresh_rate() const { return refresh_rate_; }

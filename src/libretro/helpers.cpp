@@ -103,6 +103,13 @@ bool negotiate_variable_state_size(retro_environment_t env) {
            (quirks & RETRO_SERIALIZATION_QUIRK_FRONT_VARIABLE_SIZE);
 }
 
+bool state_from_this_session(retro_environment_t env) {
+    int context = RETRO_SAVESTATE_CONTEXT_NORMAL;
+    if (!env || !env(RETRO_ENVIRONMENT_GET_SAVESTATE_CONTEXT, &context)) return false;
+    return context == RETRO_SAVESTATE_CONTEXT_RUNAHEAD_SAME_INSTANCE ||
+           context == RETRO_SAVESTATE_CONTEXT_RUNAHEAD_SAME_BINARY;
+}
+
 void set_memory_maps(retro_environment_t env, const Machine& machine) {
     // 0x500000-0xcfffff isn't listed: a real player bus-errors there.
     const MachineInspector view(machine);

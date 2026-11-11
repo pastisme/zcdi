@@ -160,24 +160,29 @@ bool Machine::state_matches(StateReader r) {
     return !r.failed();
 }
 
-bool Machine::load_state(StateReader& r) {
+bool Machine::load_state(StateReader& r, bool skip_undo) {
     if (!state_matches(r)) return false;
     // Loading writes as it goes, so a damaged state is undone from a snapshot.
     // The buffers keep their capacity across loads.
-    undo_state_.clear();
-    StateWriter snapshot(undo_state_);
-    save_state(snapshot);
+    if (!skip_undo) {
+        undo_state_.clear();
+        StateWriter snapshot(undo_state_);
+        save_state(snapshot);
+    }
     undo_nvram_.clear();
     StateWriter nvram(undo_nvram_);
     bus_.nvram_state_io(nvram);
 
     state_io(r);
     if (!r.failed()) return true;
-    StateReader undo(undo_state_);
-    state_io(undo);
-    if (!undo.failed()) return false;
+    if (!skip_undo) {
+        StateReader undo(undo_state_);
+        state_io(undo);
+        if (!undo.failed()) return false;
+    }
     // A field list reads back differently than it writes: cold boot, saves kept.
-    std::fprintf(stderr, "[zcdi] internal error: state before the load didn't reload\n");
+    std::fprintf(stderr, "[zcdi] internal error: %s didn't reload\n",
+                 skip_undo ? "state loaded without undo" : "state before the load");
     restore_power_on(/*keep_ram=*/false);
     StateReader keep(undo_nvram_);
     bus_.nvram_state_io(keep);

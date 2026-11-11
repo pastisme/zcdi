@@ -41,6 +41,8 @@ std::filesystem::path global_nvram_path(retro_environment_t env, const char* sys
 
 // True if the frontend re-queries the size before each save.
 bool negotiate_variable_state_size(retro_environment_t env);
+// Runahead: the state was saved by this core binary during this session.
+bool state_from_this_session(retro_environment_t env);
 
 // Call again whenever the machine is rebuilt: the descriptors point into it.
 void set_memory_maps(retro_environment_t env, const Machine& machine);

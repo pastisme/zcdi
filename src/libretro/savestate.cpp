@@ -41,7 +41,8 @@ size_t core_state_size(Machine& machine, Mixer& audio, InputHistory& input) {
     return machine.state_size() + sizer.size();
 }
 
-bool load_core_state(Machine& machine, Mixer& audio, InputHistory& input, std::span<const uint8_t> data) {
+bool load_core_state(Machine& machine, Mixer& audio, InputHistory& input, std::span<const uint8_t> data,
+                     bool from_this_session) {
     // Read the frontend part (after ZCST) into copies before touching anything.
     StateReader frontend(data);
     frontend.skip_section(state_tag("ZCST"));
@@ -51,7 +52,7 @@ bool load_core_state(Machine& machine, Mixer& audio, InputHistory& input, std::s
     if (frontend.failed()) return false;
 
     StateReader r(data);
-    if (!machine.load_state(r)) return false;
+    if (!machine.load_state(r, /*skip_undo=*/from_this_session)) return false;
     audio = std::move(audio_copy);
     input = input_copy;
     return true;
