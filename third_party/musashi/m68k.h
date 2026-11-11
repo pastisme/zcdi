@@ -363,6 +363,10 @@ void m68k_pulse_bus_error(void);
  * undecoded address, so the SCC68070 Format 15 frame carries it. */
 void m68k_pulse_bus_error_at(unsigned int address);
 
+/* zcdi: extra cycles for a slow memory access (wait states), from the
+ * memory callbacks, once per bus transaction. */
+void m68k_add_wait_cycles(int cycles);
+
 
 /* Context switching to allow multiple CPUs */
 

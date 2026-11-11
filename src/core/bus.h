@@ -137,6 +137,9 @@ public:
     inline const uint8_t* cpu_read_ptr(uint32_t a, uint32_t size) const;
     inline uint8_t* cpu_write_ptr(uint32_t a, uint32_t size);
 
+    // Wait cycles per CPU access to RAM, ROM and DVC memory, else 0.
+    int sdram_wait_cycles(uint32_t a) const;
+
     // SR.S of the attached CPU; false without one.
     bool cpu_supervisor() const;
 
