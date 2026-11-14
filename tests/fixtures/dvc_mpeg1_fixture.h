@@ -1,6 +1,6 @@
 // 16x16 all-intra MPEG-1 ES:
 //   ffmpeg -f lavfi -i "testsrc2=s=16x16:d=0.32:r=25,format=yuv420p" -c:v mpeg1video -g 1 -bf 0 -f mpeg1video test8frames.m1v
-// DvcVideo outputs 7 of the 8: each sequence header ends the previous one (pl_mpeg.h),
+// DvcVideo outputs 7 of the 8: each sequence header ends the previous one,
 // the last waits for a start code.
 // kDvcMpeg1StallSafePrefixByteCount bytes give one decode, then a stall.
 #pragma once

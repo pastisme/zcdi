@@ -23,7 +23,7 @@ std::unique_ptr<zcdi::Machine> auto_play_machine() {
     return m;
 }
 
-// Asks the servo for the disc status (channel 3, as servo_hle.sv) and reads its 4 bytes.
+// Asks the servo for the disc status (channel 3) and reads its 4 bytes.
 uint32_t servo_disc_status(zcdi::Machine& m) {
     for (uint8_t v : {0xfa, 0xb0, 0x00, 0x00, 0x00}) m.bus().write8(kSlaveChannel3, v);
     for (int i = 0; i < 50; ++i) m.run_frame();

@@ -1,4 +1,4 @@
-// CDi_MiSTer vmpeg.sv RegsUpd (a59880a).
+// RegsUpd: window register updates taken at vsync.
 #include "doctest.h"
 
 #include <cstdint>
@@ -10,12 +10,12 @@ using zcdi::mamecdi::VmpegDevice;
 using namespace zcdi_test;
 
 namespace {
-constexpr uint16_t kPlay = 0x0008;
-constexpr uint16_t kStep = 0x0040;
-constexpr uint16_t kRegsUpd = 0x0008;
-constexpr uint16_t kScroll = 0x0004;
-constexpr uint16_t kShow = 0x0200;
-constexpr uint16_t kIntVcup = 1u << 13;
+constexpr uint16_t kPlay = zcdi::mamecdi::vmpeg::kSysCmdPlay;
+constexpr uint16_t kStep = zcdi::mamecdi::vmpeg::kSysCmdStep;
+constexpr uint16_t kRegsUpd = zcdi::mamecdi::vmpeg::kVidCmdRegsUpd;
+constexpr uint16_t kScroll = zcdi::mamecdi::vmpeg::kVidCmdScroll;
+constexpr uint16_t kShow = zcdi::mamecdi::vmpeg::kVidCmdShow;
+constexpr uint16_t kIntVcup = zcdi::mamecdi::vmpeg::kIntVcup;
 constexpr uint16_t kIntDcl = 1u << 7;
 constexpr uint32_t kPalField = 600'000;
 constexpr int kFirstActiveLine = 26;

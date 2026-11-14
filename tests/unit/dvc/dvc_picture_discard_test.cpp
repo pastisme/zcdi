@@ -1,4 +1,4 @@
-// CDi_MiSTer 440e4a3/683e065: discarded pictures leave the dts_fifo.
+// Discarded pictures leave the DTS FIFO.
 #include "doctest.h"
 
 #include <cstdint>

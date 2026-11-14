@@ -1,4 +1,4 @@
-// CDi_MiSTer rtl/scc68070.sv.
+// SCC68070 UART receiver.
 #include "doctest.h"
 
 #include <cstdint>
@@ -6,15 +6,7 @@
 #include "scc68070/scc68070.h"
 
 using zcdi::mamecdi::Scc68070Periph;
-
-namespace {
-
-constexpr uint32_t kUartUsr = 0x80002013;
-constexpr uint32_t kUartUcr = 0x80002017;
-constexpr uint32_t kUartUrh = 0x8000201b;
-constexpr uint32_t kPicr2 = 0x80002047;
-
-}  // namespace
+using namespace zcdi::mamecdi::scc68070;
 
 TEST_SUITE("scc68070") {
 

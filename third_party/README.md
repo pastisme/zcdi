@@ -25,4 +25,4 @@ Used only by the debugger (its own CMake project in `debugger/`), not by the cor
 | `imgui/`    | [Dear ImGui](https://github.com/ocornut/imgui) `v1.92.9b-docking` release tag (docking branch) | MIT | No |
 | `imgui_club/` | `imgui_memory_editor.h` from [imgui_club](https://github.com/ocornut/imgui_club) | MIT | No |
 | `imgui-filebrowser/` | [imgui-filebrowser](https://github.com/AirGuanZ/imgui-filebrowser) | MIT | No |
-| `sokol/`    | [sokol](https://github.com/floooh/sokol)         | zlib              | No            |
+| `sokol/`    | [sokol](https://github.com/floooh/sokol) `e9b370fc` | zlib | No |

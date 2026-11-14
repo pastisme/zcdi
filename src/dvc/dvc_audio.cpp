@@ -25,7 +25,7 @@ struct FrameHeader {
     uint32_t reg = 0;
 };
 
-// MPEG-1 Layer I or II, no free format: what mpeg_audio.sv decodes.
+// MPEG-1 Layer I or II, no free format: what the DVC decodes.
 bool parse_header(const uint8_t* p, FrameHeader& h) {
     if (p[0] != 0xff || (p[1] & 0xf8) != 0xf8) return false; // sync, MPEG-1
     const int layer_bits = (p[1] >> 1) & 3;

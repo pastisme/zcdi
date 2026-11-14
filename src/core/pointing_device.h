@@ -21,7 +21,7 @@ enum PacketBits : uint8_t {
     kPacketSync = 0x40,
 };
 
-// CDi_MiSTer rtl/pointing_device.sv.
+// A serial pointing device: its ID byte, then position packets.
 struct PointingDeviceSaveState {
     enum State : uint8_t { kHeld, kSendId, kIdle, kSending };
 
@@ -63,7 +63,7 @@ public:
     // The byte finished in this span, with bit 7 set (stop bit), or -1.
     int tick(int cpu_cycles, bool rts_negated);
 
-    // Speed N (pointing_device.sv speed_lut); `held` counts packets from 1.
+    // Speed N; `held` counts packets from 1.
     static int gamepad_speed_n_step(int held) {
         int step = held + (held & 1);
         return step < 8 ? step : 8;

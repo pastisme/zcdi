@@ -76,8 +76,6 @@ std::vector<std::byte> read_binary_file(const std::string& path) {
     return out;
 }
 
-constexpr const char* kDockspaceName = "zcdi_dockspace";
-
 // The PAL BIOS of the libretro core (libretro_core.cpp kRegionProfiles).
 constexpr const char* kPalBios = "cdi220b.rom";
 
@@ -86,8 +84,6 @@ zcdi::VideoStandard video_standard_for(const std::string& bios_path) {
     return std::filesystem::path(bios_path).filename() == kPalBios ? zcdi::VideoStandard::kPal
                                                                    : zcdi::VideoStandard::kNtsc;
 }
-
-constexpr std::size_t kMaxRecentDiscs = 8;
 
 // The DVC cartridge ROM, looked for beside the BIOS (as the libretro core does).
 constexpr const char* kDvcRom = "vmpega.rom";
@@ -98,32 +94,6 @@ bool is_dvc_rom(const std::string& path) {
         c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     return name == kDvcRom;
 }
-
-// Lower-case, with the dot: ".cue".
-std::string lower_extension(const std::string& path) {
-    std::string ext = std::filesystem::path(path).extension().string();
-    for (char& c : ext)
-        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    return ext;
-}
-
-// The paused-only run commands, in Run menu and toolbar order.
-struct StepCommand {
-    RunCommand command;
-    const char* menu;
-    const char* button;
-    const char* shortcut;
-    ImGuiKey key;
-    bool shift;
-};
-
-constexpr StepCommand kStepCommands[] = {
-    {RunCommand::kStepInto, "Step into", "Into", "F11", ImGuiKey_F11, false},
-    {RunCommand::kStepOver, "Step over", "Over", "F10", ImGuiKey_F10, false},
-    {RunCommand::kStepOut, "Step out", "Out", "Shift+F11", ImGuiKey_F11, true},
-    {RunCommand::kStepLine, "Step line", "Line", "F7", ImGuiKey_F7, false},
-    {RunCommand::kStepFrame, "Step frame", "Frame", "F6", ImGuiKey_F6, false},
-};
 
 // Per-user config dir, so the layout follows the user, not the launch dir.
 std::string ini_file_path() {
@@ -301,14 +271,11 @@ void DebuggerApp::on_stop(EmuRunner::Stop why) {
     const char* what = why == EmuRunner::Stop::kBreakpoint ? (note.empty() ? "Breakpoint" : note.c_str())
                        : why == EmuRunner::Stop::kStep     ? "Stopped"
                                                            : "Paused";
-    const std::string where = state_.symbols.where(pc);
     if (state_.runner->mid_frame()) {
-        std::snprintf(text, sizeof(text), "%s at %06X%s%s, line %d", what, static_cast<unsigned>(pc),
-                      where.empty() ? "" : " ", where.c_str(), view.line());
+        std::snprintf(text, sizeof(text), "%s at %06X, line %d", what, static_cast<unsigned>(pc), view.line());
         copy_framebuffer();
     } else {
-        std::snprintf(text, sizeof(text), "%s at frame end, PC %06X%s%s", what, static_cast<unsigned>(pc),
-                      where.empty() ? "" : " ", where.c_str());
+        std::snprintf(text, sizeof(text), "%s at frame end, PC %06X", what, static_cast<unsigned>(pc));
     }
     state_.stop_text = text;
 }
@@ -423,22 +390,6 @@ void DebuggerApp::setup_frame_texture(int width, int height) {
     state_.active_h = height;
     state_.framebuffer.assign(static_cast<std::size_t>(width) * static_cast<std::size_t>(height), 0xff000000u);
     state_.frame_texture.create(width, height, "zcdi-framebuffer");
-}
-
-void DebuggerApp::load_symbols() {
-    std::vector<std::string> paths;
-    if (!config_.bios_path.empty()) {
-        // Optional: listings named after the ROMs, beside them.
-        std::error_code ec;
-        for (const std::filesystem::path& rom : {std::filesystem::path(config_.bios_path), dvc_rom_path()}) {
-            const std::filesystem::path candidate = rom.parent_path() / (rom.stem().string() + ".asm");
-            if (std::filesystem::is_regular_file(candidate, ec)) paths.push_back(candidate.string());
-        }
-    }
-    for (const std::string& path : paths) {
-        const bool ok = state_.symbols.load(path);
-        log(ok ? SlogLevel::Info : SlogLevel::Warning, (ok ? "Symbols: " : "Couldn't read symbols: ") + path);
-    }
 }
 
 void DebuggerApp::start_machine() {
@@ -566,31 +517,8 @@ void DebuggerApp::init() {
     }
     if (!config_.bios_path.empty()) recent_bios_ = config_.bios_path;
     if (!config_.disc_path.empty()) remember_disc(config_.disc_path);
-    load_symbols();
     start_machine();
     if (config_.bios_path.empty()) browse(*bios_browser_, "");
-}
-
-void DebuggerApp::browse(ImGui::FileBrowser& browser, const std::string& current) {
-    std::error_code ec;
-    const std::filesystem::path dir = std::filesystem::path(current).parent_path();
-    if (!current.empty() && std::filesystem::is_directory(dir, ec)) browser.SetDirectory(dir);
-    browser.Open();
-}
-
-void DebuggerApp::draw_file_browsers() {
-    bios_browser_->Display();
-    if (bios_browser_->HasSelected()) {
-        const std::string path = bios_browser_->GetSelected().string();
-        bios_browser_->ClearSelected();
-        open_file(path); // vmpega.rom is the DVC cartridge
-    }
-    disc_browser_->Display();
-    if (disc_browser_->HasSelected()) {
-        const std::string path = disc_browser_->GetSelected().string();
-        disc_browser_->ClearSelected();
-        open_disc(path);
-    }
 }
 
 void DebuggerApp::open_file(const std::string& path) {
@@ -616,19 +544,14 @@ void DebuggerApp::open_dvc_rom(const std::string& path) {
         browse(*bios_browser_, "");
         return;
     }
-    state_.symbols = Symbols{};
-    load_symbols();
     start_machine();
 }
 
-// A new player: symbols beside the BIOS are reloaded.
 void DebuggerApp::open_bios(const std::string& path) {
     config_.bios_path = path;
     state_.video_standard = video_standard_for(path);
     recent_bios_ = path;
     ImGui::MarkIniSettingsDirty();
-    state_.symbols = Symbols{};
-    load_symbols();
     start_machine();
 }
 
@@ -642,13 +565,6 @@ void DebuggerApp::open_disc(const std::string& path) {
         return;
     }
     start_machine();
-}
-
-void DebuggerApp::remember_disc(const std::string& path) {
-    std::erase(recent_discs_, path);
-    recent_discs_.insert(recent_discs_.begin(), path);
-    if (recent_discs_.size() > kMaxRecentDiscs) recent_discs_.resize(kMaxRecentDiscs);
-    ImGui::MarkIniSettingsDirty();
 }
 
 void DebuggerApp::frame() {
@@ -742,448 +658,6 @@ void DebuggerApp::frame() {
     sg_commit();
 }
 
-// Entry kinds of the ZcdiDbg section.
-constexpr std::uintptr_t kIniWindows = 1;
-constexpr std::uintptr_t kIniBreakpoints = 2;
-constexpr std::uintptr_t kIniRecent = 3;
-constexpr std::uintptr_t kIniOptions = 4;
-
-void* DebuggerApp::settings_open(ImGuiContext*, ImGuiSettingsHandler*, const char* name) {
-    if (std::strcmp(name, "Windows") == 0) return reinterpret_cast<void*>(kIniWindows);
-    if (std::strcmp(name, "Breakpoints") == 0) return reinterpret_cast<void*>(kIniBreakpoints);
-    if (std::strcmp(name, "Recent") == 0) return reinterpret_cast<void*>(kIniRecent);
-    if (std::strcmp(name, "Options") == 0) return reinterpret_cast<void*>(kIniOptions);
-    return nullptr;
-}
-
-// Windows: "Title=0|1". Breakpoints: "hexaddress=0|1" (enabled). Recent: "bios=path", "disc=path".
-// Options: "auto_play=0|1", "tv_aspect=0|1", "front_mouse=0|1".
-void DebuggerApp::settings_read_line(ImGuiContext*, ImGuiSettingsHandler* handler, void* entry, const char* line) {
-    auto* app = static_cast<DebuggerApp*>(handler->UserData);
-    if (app && reinterpret_cast<std::uintptr_t>(entry) == kIniRecent) {
-        // The first '=': a path may hold more.
-        if (std::strncmp(line, "bios=", 5) == 0) app->recent_bios_ = line + 5;
-        if (std::strncmp(line, "disc=", 5) == 0 && app->recent_discs_.size() < kMaxRecentDiscs) {
-            app->recent_discs_.emplace_back(line + 5);
-        }
-        return;
-    }
-    if (app && reinterpret_cast<std::uintptr_t>(entry) == kIniOptions) {
-        if (std::strcmp(line, "auto_play=1") == 0) app->state_.auto_play = true;
-        if (std::strcmp(line, "tv_aspect=1") == 0) app->state_.tv_aspect = true;
-        if (std::strcmp(line, "front_mouse=1") == 0) app->state_.front_mouse = true;
-        return;
-    }
-    const char* eq = std::strrchr(line, '=');
-    if (!app || !eq) return;
-    const std::string name(line, static_cast<std::size_t>(eq - line));
-    if (reinterpret_cast<std::uintptr_t>(entry) == kIniBreakpoints) {
-        if (!app->state_.runner) return;
-        EmuRunner& runner = *app->state_.runner;
-        if (name.rfind("os9:", 0) == 0) {
-            runner.os9_breaks.insert(static_cast<uint16_t>(std::strtoul(name.c_str() + 4, nullptr, 16)));
-        } else if (name.rfind("vec:", 0) == 0) {
-            runner.vector_breaks.insert(static_cast<uint8_t>(std::strtoul(name.c_str() + 4, nullptr, 10)));
-        } else {
-            char* end = nullptr;
-            const unsigned long addr = std::strtoul(name.c_str(), &end, 16);
-            if (end && *end == '\0') runner.breakpoints[static_cast<uint32_t>(addr)] = eq[1] != '0';
-        }
-        return;
-    }
-    for (std::size_t i = 0; i < app->widgets_.size(); ++i) {
-        if (name == app->widgets_[i]->title()) {
-            app->widgets_[i]->open = eq[1] != '0';
-            app->widgets_were_open_[i] = app->widgets_[i]->open;
-        }
-    }
-}
-
-void DebuggerApp::settings_write_all(ImGuiContext*, ImGuiSettingsHandler* handler, ImGuiTextBuffer* out) {
-    auto* app = static_cast<DebuggerApp*>(handler->UserData);
-    if (!app) return;
-    out->appendf("[%s][Windows]\n", handler->TypeName);
-    for (const auto& widget : app->widgets_)
-        out->appendf("%s=%d\n", widget->title(), widget->open ? 1 : 0);
-    out->append("\n");
-    out->appendf("[%s][Options]\nauto_play=%d\ntv_aspect=%d\nfront_mouse=%d\n\n", handler->TypeName,
-                 app->state_.auto_play ? 1 : 0, app->state_.tv_aspect ? 1 : 0, app->state_.front_mouse ? 1 : 0);
-    if (!app->recent_bios_.empty() || !app->recent_discs_.empty()) {
-        out->appendf("[%s][Recent]\n", handler->TypeName);
-        if (!app->recent_bios_.empty()) out->appendf("bios=%s\n", app->recent_bios_.c_str());
-        for (const std::string& disc : app->recent_discs_)
-            out->appendf("disc=%s\n", disc.c_str());
-        out->append("\n");
-    }
-    const EmuRunner* runner = app->state_.runner.get();
-    if (!runner || (runner->breakpoints.empty() && runner->os9_breaks.empty() && runner->vector_breaks.empty())) return;
-    out->appendf("[%s][Breakpoints]\n", handler->TypeName);
-    for (const auto& [addr, enabled] : runner->breakpoints) {
-        out->appendf("%06X=%d\n", static_cast<unsigned>(addr), enabled ? 1 : 0);
-    }
-    for (const uint16_t code : runner->os9_breaks)
-        out->appendf("os9:%02X=1\n", static_cast<unsigned>(code));
-    for (const uint8_t vector : runner->vector_breaks)
-        out->appendf("vec:%u=1\n", static_cast<unsigned>(vector));
-    out->append("\n");
-}
-
-void DebuggerApp::handle_hotkeys() {
-    if (ImGui::GetIO().WantTextInput) return;
-    const bool shift = ImGui::GetIO().KeyShift;
-    if (ImGui::IsKeyPressed(ImGuiKey_F5, false)) toggle_running();
-    // Later rows win: Shift+F11 is Step out, not Step into.
-    for (const StepCommand& step : kStepCommands) {
-        if (ImGui::IsKeyPressed(step.key, false) && (!step.shift || shift)) state_.command = step.command;
-    }
-    if (ImGui::IsKeyPressed(ImGuiKey_F2, false)) quick_save();
-    if (ImGui::IsKeyPressed(ImGuiKey_F4, false)) quick_load();
-    const bool enter = ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false);
-    if (enter && ImGui::GetIO().KeyAlt) set_rendering_maximized(!state_.rendering_maximized);
-}
-
-void DebuggerApp::set_rendering_maximized(bool on) {
-    state_.rendering_maximized = on;
-    if (sapp_is_fullscreen() != on) sapp_toggle_fullscreen();
-}
-
-void DebuggerApp::draw_menu_bar() {
-    if (!ImGui::BeginMainMenuBar()) return;
-    const bool have_machine = state_.machine != nullptr;
-    if (ImGui::BeginMenu("File")) {
-        if (ImGui::MenuItem("Open disc...")) browse(*disc_browser_, config_.disc_path);
-        if (ImGui::BeginMenu("Recent discs", !recent_discs_.empty())) {
-            std::string chosen; // opening reorders the list
-            for (const std::string& path : recent_discs_) {
-                const std::string label = std::filesystem::path(path).filename().string() + "##" + path;
-                if (ImGui::MenuItem(label.c_str())) chosen = path;
-                ImGui::SetItemTooltip("%s", path.c_str());
-            }
-            ImGui::EndMenu();
-            if (!chosen.empty()) open_disc(chosen);
-        }
-        if (ImGui::MenuItem("Open BIOS...")) browse(*bios_browser_, config_.bios_path);
-        ImGui::Separator();
-        const bool whole_frame = have_machine && !state_.runner->mid_frame();
-        if (ImGui::MenuItem("Quick save", "F2", false, whole_frame)) quick_save();
-        if (ImGui::MenuItem("Quick load", "F4", false, whole_frame && !quick_state_.empty())) quick_load();
-        ImGui::Separator();
-        const bool tray_open = have_machine && state_.machine->tray_open();
-        if (ImGui::MenuItem("Tray open", nullptr, tray_open, have_machine)) state_.machine->set_tray_open(!tray_open);
-        ImGui::Separator();
-        if (ImGui::MenuItem("Reset", nullptr, false, have_machine)) reset_machine(false);
-        if (ImGui::MenuItem("Power cycle", nullptr, false, have_machine)) reset_machine(true);
-        ImGui::Separator();
-        if (ImGui::MenuItem("Quit")) sapp_request_quit();
-        ImGui::EndMenu();
-    }
-    if (ImGui::BeginMenu("Run")) {
-        const bool paused = have_machine && !state_.running;
-        if (ImGui::MenuItem(state_.running ? "Pause" : "Run", "F5", false, have_machine)) toggle_running();
-        ImGui::Separator();
-        for (const StepCommand& step : kStepCommands) {
-            if (ImGui::MenuItem(step.menu, step.shortcut, false, paused)) state_.command = step.command;
-        }
-        ImGui::EndMenu();
-    }
-    if (ImGui::BeginMenu("View")) {
-        for (const auto& widget : widgets_)
-            ImGui::MenuItem(widget->title(), nullptr, &widget->open);
-        ImGui::Separator();
-        if (ImGui::MenuItem("Fullscreen rendering", "Alt+Enter", state_.rendering_maximized)) {
-            set_rendering_maximized(!state_.rendering_maximized);
-        }
-        if (ImGui::MenuItem("Reset layout")) reset_layout_requested_ = true;
-        ImGui::EndMenu();
-    }
-    if (ImGui::BeginMenu("Options")) {
-        // Changing it powers on a new player of that model.
-        if (ImGui::MenuItem("NTSC", nullptr, state_.video_standard == zcdi::VideoStandard::kNtsc)) {
-            state_.video_standard = zcdi::VideoStandard::kNtsc;
-        }
-        if (ImGui::MenuItem("PAL", nullptr, state_.video_standard == zcdi::VideoStandard::kPal)) {
-            state_.video_standard = zcdi::VideoStandard::kPal;
-        }
-        ImGui::Separator();
-        // Like the libretro core option: read at power-on.
-        if (ImGui::MenuItem("Auto Play", nullptr, &state_.auto_play)) ImGui::MarkIniSettingsDirty();
-        ImGui::SetItemTooltip("Starts a CD-i disc without the player's menu.\nTakes effect at the next power cycle.");
-        if (ImGui::MenuItem("TV aspect ratio", nullptr, &state_.tv_aspect)) ImGui::MarkIniSettingsDirty();
-        ImGui::SetItemTooltip(
-            "Shows the picture with the shape it has on a TV instead of 4:3,\n"
-            "from the player's pixel timing.");
-        if (ImGui::MenuItem("Front device: mouse", nullptr, &state_.front_mouse)) ImGui::MarkIniSettingsDirty();
-        ImGui::SetItemTooltip(
-            "A mouse ('M') instead of a gamepad ('J') in the front socket.\n"
-            "Both take the arrows and the captured mouse.\n"
-            "Plugging the other one makes the player detect it again.");
-        ImGui::MenuItem("Mute audio", nullptr, &state_.muted);
-        ImGui::EndMenu();
-    }
-    if (ImGui::BeginMenu("Help")) {
-        if (ImGui::MenuItem("Controls")) help_popup_requested_ = "Controls";
-        if (ImGui::MenuItem("License")) help_popup_requested_ = "License";
-        ImGui::Separator();
-        if (ImGui::MenuItem("About")) help_popup_requested_ = "About zcdi dbg";
-        ImGui::EndMenu();
-    }
-    ImGui::EndMainMenuBar();
-    draw_help_popups();
-}
-
-namespace {
-
-struct KeyRow {
-    const char* key;
-    const char* action;
-};
-
-// Rows with a null action are section headings.
-constexpr KeyRow kControls[] = {
-    {"Emulation", nullptr},
-    {"F5", "Run / pause (pause lands at a frame end)"},
-    {"F11", "Step into: one instruction"},
-    {"F10", "Step over: past a BSR, JSR or OS-9 TRAP call"},
-    {"Shift+F11", "Step out: until the current routine returns"},
-    {"F7", "Step to the next field line"},
-    {"F6", "Run to the end of the frame"},
-    {"F2 / F4", "Quick save / quick load (in memory, whole frames only)"},
-    {"Alt+Enter", "Fullscreen rendering on / off"},
-    {"Esc", "Leave fullscreen (releases a captured mouse first)"},
-    {"Files", nullptr},
-    {"Drop a file", "A disc image, a BIOS .rom or vmpega.rom (the DVC): the player powers on with it"},
-    {"Disassembly", nullptr},
-    {"Click gutter, F9", "Toggle a breakpoint on the line"},
-    {"Right-click", "Run to here, toggle breakpoint"},
-    {"Mouse wheel", "Scroll (stops following PC)"},
-    {"CD-i pointer", nullptr},
-    {"Arrows", "Move the pointer (speeds up while held)"},
-    {"Z or S", "Button 1"},
-    {"X", "Button 2"},
-    {"A", "Buttons 1 + 2"},
-    {"F8", "Capture the mouse (hover Rendering first)"},
-    {"F8 or Esc", "Release the mouse"},
-    {"Mouse buttons", "Left: button 1, right: button 2, middle: both (captured)"},
-    {"Command line", nullptr},
-    {"bios=<file>", "BIOS ROM; cdi220b.rom starts PAL, others NTSC"},
-    {"disc=<file>", "Disc image (.cue, .chd, ...)"},
-};
-
-struct LicenseRow {
-    const char* part;
-    const char* license;
-};
-
-constexpr LicenseRow kLicenses[] = {
-    {"zcdi", "GPL-3.0-or-later"},
-    {"mamecdi (from MAME)", "BSD-3-Clause"},
-    {"Musashi", "MIT"},
-    {"libmpeg2", "GPL-2.0-or-later"},
-    {"libchdr", "BSD-3-Clause"},
-    {"minimp3", "CC0-1.0"},
-    {"playcdi", "LGPL-2.0-or-later"},
-    {"libretro-common", "MIT"},
-    {"Dear ImGui", "MIT"},
-    {"sokol", "zlib"},
-    {"imgui_club (memory editor)", "MIT"},
-    {"imgui-filebrowser", "MIT"},
-};
-
-bool begin_help_popup(const char* name) {
-    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    return ImGui::BeginPopupModal(name, nullptr, ImGuiWindowFlags_AlwaysAutoResize);
-}
-
-void end_help_popup() {
-    ImGui::Spacing();
-    if (ImGui::Button("Close", ImVec2(120.0f, 0.0f)) || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
-        ImGui::CloseCurrentPopup();
-    }
-    ImGui::EndPopup();
-}
-
-} // namespace
-
-void DebuggerApp::draw_help_popups() {
-    if (help_popup_requested_) {
-        ImGui::OpenPopup(help_popup_requested_);
-        help_popup_requested_ = nullptr;
-    }
-
-    if (begin_help_popup("Controls")) {
-        const ImGuiTableFlags flags =
-            ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingFixedFit;
-        if (ImGui::BeginTable("controls", 2, flags)) {
-            ImGui::TableSetupColumn("Key");
-            ImGui::TableSetupColumn("Action");
-            ImGui::TableHeadersRow();
-            for (const KeyRow& row : kControls) {
-                ImGui::TableNextRow();
-                ImGui::TableSetColumnIndex(0);
-                if (!row.action) {
-                    ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, ImGui::GetColorU32(ImGuiCol_TableHeaderBg));
-                    ImGui::TextColored(ImGui::GetStyleColorVec4(ImGuiCol_PlotHistogram), "%s", row.key);
-                    continue;
-                }
-                ImGui::TextUnformatted(row.key);
-                ImGui::TableSetColumnIndex(1);
-                ImGui::TextUnformatted(row.action);
-            }
-            ImGui::EndTable();
-        }
-        end_help_popup();
-    }
-
-    if (begin_help_popup("License")) {
-        ImGui::TextUnformatted("zcdi dbg is free software under the GNU General Public License,");
-        ImGui::TextUnformatted("version 3 or (at your option) any later version. It comes with");
-        ImGui::TextUnformatted("ABSOLUTELY NO WARRANTY. The full text is the LICENSE file at the");
-        ImGui::TextUnformatted("root of the source tree.");
-        ImGui::Spacing();
-        ImGui::TextUnformatted("It includes:");
-        if (ImGui::BeginTable("licenses", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit)) {
-            for (const LicenseRow& row : kLicenses) {
-                ImGui::TableNextRow();
-                ImGui::TableSetColumnIndex(0);
-                ImGui::TextUnformatted(row.part);
-                ImGui::TableSetColumnIndex(1);
-                ImGui::TextDisabled("%s", row.license);
-            }
-            ImGui::EndTable();
-        }
-        ImGui::TextDisabled("Each licence text is in its directory under third_party/ and mamecdi/.");
-        end_help_popup();
-    }
-
-    if (begin_help_popup("About zcdi dbg")) {
-        ImGui::Text("zcdi dbg %d.%d.%d%s", ZCDI_VERSION_MAJOR, ZCDI_VERSION_MINOR, ZCDI_VERSION_PATCH,
-                    ZCDI_VERSION_PRERELEASE);
-        ImGui::Separator();
-        ImGui::TextUnformatted("Debugger for zcdi, a Philips CD-i (Mono-I) emulator with DVC support.");
-        ImGui::TextUnformatted("Built on the work of MAME, CDi_MiSTer and CD-i Fan.");
-        ImGui::Spacing();
-        ImGui::TextDisabled("GPL-3.0-or-later, no warranty (Help > License).");
-        ImGui::TextDisabled("Dear ImGui %s, sokol", IMGUI_VERSION);
-        end_help_popup();
-    }
-}
-
-void DebuggerApp::draw_toolbar() {
-    const ImGuiWindowFlags flags = ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings;
-    const float height = ImGui::GetFrameHeight() + ImGui::GetStyle().WindowPadding.y * 2.0f;
-    if (ImGui::BeginViewportSideBar("##toolbar", ImGui::GetMainViewport(), ImGuiDir_Up, height, flags)) {
-        const bool have_machine = state_.machine != nullptr;
-        ImGui::BeginDisabled(!have_machine);
-        if (ImGui::Button(state_.running ? "Pause" : " Run ")) toggle_running();
-        ImGui::BeginDisabled(state_.running);
-        for (const StepCommand& step : kStepCommands) {
-            ImGui::SameLine();
-            if (ImGui::Button(step.button)) state_.command = step.command;
-        }
-        ImGui::EndDisabled();
-        ImGui::SameLine();
-        ImGui::TextDisabled("|");
-        ImGui::SameLine();
-        const bool mid_frame = state_.runner->mid_frame();
-        ImGui::BeginDisabled(mid_frame);
-        if (ImGui::Button("Save")) quick_save();
-        ImGui::SameLine();
-        ImGui::BeginDisabled(quick_state_.empty());
-        if (ImGui::Button("Load")) quick_load();
-        ImGui::EndDisabled();
-        ImGui::EndDisabled();
-        ImGui::SameLine();
-        ImGui::TextDisabled("|");
-        ImGui::SameLine();
-        if (ImGui::Button("Reset")) reset_machine(false);
-        ImGui::SameLine();
-        const bool tray_open = have_machine && state_.machine->tray_open();
-        if (ImGui::Button(tray_open ? "Close tray" : "Open tray")) state_.machine->set_tray_open(!tray_open);
-        ImGui::EndDisabled();
-    }
-    ImGui::End();
-}
-
-void DebuggerApp::draw_status_bar() {
-    const ImGuiWindowFlags flags =
-        ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_MenuBar;
-    if (ImGui::BeginViewportSideBar("##statusbar", ImGui::GetMainViewport(), ImGuiDir_Down, ImGui::GetFrameHeight(),
-                                    flags)) {
-        if (ImGui::BeginMenuBar()) {
-            if (state_.machine) {
-                const zcdi::MachineInspector view(*state_.machine);
-                ImGui::TextUnformatted(state_.running ? "Running" : "Paused");
-                ImGui::Separator();
-                if (state_.runner->mid_frame()) {
-                    ImGui::Text("Frame %d line %d", view.frame(), view.line());
-                } else {
-                    ImGui::Text("Frame %d", view.frame());
-                }
-                ImGui::Separator();
-                ImGui::Text("%s %.0f Hz", state_.built_video_standard == zcdi::VideoStandard::kPal ? "PAL" : "NTSC",
-                            state_.machine->refresh_rate());
-                ImGui::Separator();
-                ImGui::TextUnformatted(state_.bios_name.c_str());
-                ImGui::Separator();
-                ImGui::TextUnformatted(state_.machine->tray_open() ? "Tray open" : "Tray closed");
-                ImGui::Separator();
-                ImGui::TextUnformatted(state_.dvc_rom_loaded ? "DVC" : "No DVC");
-                ImGui::Separator();
-            }
-            if (!(state_.audio_backend_ok && saudio_isvalid())) {
-                ImGui::TextUnformatted("No audio, timer paced");
-                ImGui::Separator();
-            }
-            if (state_.mouse_captured_for_game) {
-                ImGui::TextUnformatted("Mouse captured (F8/Esc)");
-                ImGui::Separator();
-            }
-            if (state_.machine && !state_.runner->hook_seen() && zcdi::MachineInspector(*state_.machine).frame() > 1) {
-                ImGui::TextUnformatted("No CPU hook in this core: breakpoints off");
-                ImGui::Separator();
-            }
-            if (state_.machine) {
-                ImGui::Text("%.0f FPS", emu_fps_);
-                ImGui::Separator();
-            }
-            ImGui::TextUnformatted(state_.stop_text.empty() ? state_.status.c_str() : state_.stop_text.c_str());
-            ImGui::EndMenuBar();
-        }
-    }
-    ImGui::End();
-}
-
-// Rendering in the middle, CPU state on the right, memory underneath.
-void DebuggerApp::draw_dockspace() {
-    const ImGuiViewport* viewport = ImGui::GetMainViewport();
-    const ImGuiID dockspace_id = ImGui::GetID(kDockspaceName);
-    const ImGuiDockNode* node = ImGui::DockBuilderGetNode(dockspace_id);
-    if (reset_layout_requested_ || !node || (!node->IsSplitNode() && node->Windows.Size == 0)) {
-        reset_layout_requested_ = false;
-        ImGui::DockBuilderRemoveNode(dockspace_id);
-        ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
-        ImGui::DockBuilderSetNodeSize(dockspace_id, viewport->WorkSize);
-        ImGuiID center = dockspace_id;
-        const ImGuiID right = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.30f, nullptr, &center);
-        const ImGuiID bottom = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.30f, nullptr, &center);
-        ImGuiID right_bottom = right;
-        const ImGuiID right_top = ImGui::DockBuilderSplitNode(right, ImGuiDir_Up, 0.30f, nullptr, &right_bottom);
-        ImGui::DockBuilderDockWindow("Rendering", center);
-        ImGui::DockBuilderDockWindow("CPU", right_top);
-        ImGui::DockBuilderDockWindow("Disassembly", right_bottom);
-        ImGui::DockBuilderDockWindow("Stack", right_bottom);
-        ImGui::DockBuilderDockWindow("Breakpoints", right_bottom);
-        ImGui::DockBuilderDockWindow("Memory", bottom);
-        ImGui::DockBuilderDockWindow("MCD212", bottom);
-        ImGui::DockBuilderDockWindow("Devices", bottom);
-        ImGui::DockBuilderDockWindow("Trace", bottom);
-        ImGui::DockBuilderFinish(dockspace_id);
-        for (const auto& widget : widgets_)
-            widget->open = true;
-    }
-    ImGui::DockSpaceOverViewport(dockspace_id, viewport, ImGuiDockNodeFlags_PassthruCentralNode);
-}
-
 void DebuggerApp::cleanup() {
     state_.runner.reset(); // finishes a cut frame on the machine
     for (const auto& widget : widgets_)
@@ -1196,100 +670,4 @@ void DebuggerApp::cleanup() {
     saudio_shutdown();
     simgui_shutdown();
     sg_shutdown();
-}
-
-void DebuggerApp::event(const sapp_event* ev) {
-    simgui_handle_event(ev);
-
-    auto release_capture = [this]() {
-        state_.mouse_captured_for_game = false;
-        sapp_lock_mouse(false);
-        state_.input.dx = 0;
-        state_.input.dy = 0;
-        state_.input.mouse_button1 = false;
-        state_.input.mouse_button2 = false;
-        state_.input.mouse_button12 = false;
-        state_.input.pressed_button1 = false;
-        state_.input.pressed_button2 = false;
-        state_.input.pressed_button12 = false;
-    };
-
-    auto set_keyboard_key = [this](sapp_keycode key_code, bool down) {
-        switch (key_code) {
-            case SAPP_KEYCODE_LEFT: state_.input.keyboard_left = down; break;
-            case SAPP_KEYCODE_RIGHT: state_.input.keyboard_right = down; break;
-            case SAPP_KEYCODE_UP: state_.input.keyboard_up = down; break;
-            case SAPP_KEYCODE_DOWN: state_.input.keyboard_down = down; break;
-            // Z/S: button1, X: button2, A: button1+2.
-            case SAPP_KEYCODE_Z: state_.input.keyboard_key_z = down; break;
-            case SAPP_KEYCODE_S: state_.input.keyboard_key_s = down; break;
-            case SAPP_KEYCODE_X: state_.input.keyboard_key_x = down; break;
-            case SAPP_KEYCODE_A: state_.input.keyboard_key_a = down; break;
-            default: break;
-        }
-        if (!down) return;
-        if (key_code == SAPP_KEYCODE_Z || key_code == SAPP_KEYCODE_S) state_.input.pressed_button1 = true;
-        if (key_code == SAPP_KEYCODE_X) state_.input.pressed_button2 = true;
-        if (key_code == SAPP_KEYCODE_A) state_.input.pressed_button12 = true;
-    };
-
-    switch (ev->type) {
-        case SAPP_EVENTTYPE_KEY_DOWN:
-            set_keyboard_key(ev->key_code, true);
-            if (ev->key_code == SAPP_KEYCODE_ESCAPE && state_.mouse_captured_for_game) {
-                release_capture();
-            } else if (ev->key_code == SAPP_KEYCODE_ESCAPE && state_.rendering_maximized) {
-                set_rendering_maximized(false);
-            } else if (ev->key_code == SAPP_KEYCODE_F8) {
-                if (state_.mouse_captured_for_game) {
-                    release_capture();
-                } else if (state_.rendering_hovered) {
-                    state_.mouse_captured_for_game = true;
-                    // for WSLg pointer is absolute, so raw motion isn't a delta.
-                    if (!std::getenv("WSL_DISTRO_NAME")) sapp_lock_mouse(true);
-                } else {
-                    state_.status = "Hover Rendering window, then press F8 to capture mouse";
-                }
-            }
-            break;
-        case SAPP_EVENTTYPE_FILES_DROPPED: {
-            // A .cue dropped with its .bin files: take the image, not a track.
-            const int count = sapp_get_num_dropped_files();
-            for (int i = 0; i < count; ++i) {
-                const std::string path = sapp_get_dropped_file_path(i);
-                const std::string ext = lower_extension(path);
-                if (i == 0 || ext == ".rom" || ext == ".cue" || ext == ".chd" || ext == ".iso") dropped_path_ = path;
-                if (ext != ".bin") break;
-            }
-            break;
-        }
-        case SAPP_EVENTTYPE_KEY_UP: set_keyboard_key(ev->key_code, false); break;
-        case SAPP_EVENTTYPE_MOUSE_MOVE:
-            if (state_.mouse_captured_for_game) {
-                state_.input.dx += static_cast<int>(ev->mouse_dx);
-                state_.input.dy += static_cast<int>(ev->mouse_dy);
-            }
-            break;
-        case SAPP_EVENTTYPE_UNFOCUSED: // sokol drops the lock here
-            if (state_.mouse_captured_for_game) release_capture();
-            break;
-        case SAPP_EVENTTYPE_MOUSE_DOWN:
-            if (state_.mouse_captured_for_game) {
-                if (ev->mouse_button == SAPP_MOUSEBUTTON_LEFT)
-                    state_.input.mouse_button1 = state_.input.pressed_button1 = true;
-                if (ev->mouse_button == SAPP_MOUSEBUTTON_RIGHT)
-                    state_.input.mouse_button2 = state_.input.pressed_button2 = true;
-                if (ev->mouse_button == SAPP_MOUSEBUTTON_MIDDLE)
-                    state_.input.mouse_button12 = state_.input.pressed_button12 = true;
-            }
-            break;
-        case SAPP_EVENTTYPE_MOUSE_UP:
-            if (state_.mouse_captured_for_game) {
-                if (ev->mouse_button == SAPP_MOUSEBUTTON_LEFT) state_.input.mouse_button1 = false;
-                if (ev->mouse_button == SAPP_MOUSEBUTTON_RIGHT) state_.input.mouse_button2 = false;
-                if (ev->mouse_button == SAPP_MOUSEBUTTON_MIDDLE) state_.input.mouse_button12 = false;
-            }
-            break;
-        default: break;
-    }
 }

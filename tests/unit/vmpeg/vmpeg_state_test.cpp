@@ -41,7 +41,7 @@ TEST_CASE("a restored VMPEG keeps its clocks and pending transfer bytes") {
 
 TEST_SUITE("vmpeg") {
 
-// SYS_STS (0xE0405E): vmpeg.sv fmv_request_for_bits, mpeg_video.sv fifo_full (level > 62000).
+// SYS_STS (0xE0405E): input FIFO full above 62000 bytes.
 TEST_CASE("SYS_STS reports the video input FIFO full above 62000 bytes") {
     VmpegDevice v;
     CHECK(read16(v, kFmvSysStsOffset) == 0x2000);
@@ -66,7 +66,7 @@ TEST_CASE("Clear FIFO empties the input FIFO") {
     CHECK(read16(v, kFmvSysStsOffset) == 0x2000);
 }
 
-// mpeg_demuxer.sv, mpeg_video.sv: PES DTS -> dts_fifo (PICS_IN_FIFO) -> display.
+// PES DTS -> DTS FIFO (PICS_IN_FIFO) -> display.
 TEST_CASE("the demuxed DTS drives PICS_IN_FIFO and the display start") {
     VmpegDevice v;
     auto timestamp = [](uint8_t prefix, int64_t t) {
@@ -108,7 +108,7 @@ TEST_CASE("the demuxed DTS drives PICS_IN_FIFO and the display start") {
 
     write16(v, kFmvSyscmdOffset, 0x0100);  // Clear FIFO
     CHECK(read16(v, kFmvPicsInFifoOffset) == 0);
-    CHECK(read16(v, kFmvDtsOffset) == 0);  // the demuxer reset clears the DTS (mpeg_demuxer.sv:62)
+    CHECK(read16(v, kFmvDtsOffset) == 0);  // the demuxer reset clears the DTS
     CHECK_FALSE(v.video_display_enabled());
 }
 
@@ -116,7 +116,7 @@ TEST_CASE("the demuxed DTS drives PICS_IN_FIFO and the display start") {
 
 TEST_SUITE("vmpeg") {
 
-// mpeg_video.sv pictures_in_input_fifo_no_discard: counted until Play, never decremented.
+// Counted until Play, never decremented.
 TEST_CASE("before Play PICS_IN_FIFO counts every picture received since Decoder On") {
     VmpegDevice v;
     write16(v, kFmvSyscmdOffset, 0x1000);  // Decoder On

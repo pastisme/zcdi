@@ -1,4 +1,4 @@
-// CDi_MiSTer dsp_registers.sv.
+// FMA DSP volume registers.
 #include "doctest.h"
 
 #include <cstdint>
@@ -19,11 +19,11 @@ TEST_SUITE("vmpeg") {
 
 TEST_CASE("DSPA/DSPD program the stereo gain matrix") {
     VmpegDevice v;
-    // No reset in dsp_registers.sv: power-on 0, muted.
+    // No reset: power-on 0, muted.
     CHECK(v.mpeg_volume_r2r() == 0);
     CHECK(v.mpeg_volume_l2l() == 0);
 
-    // dsp_registers.sv order: mode, target, then four dspa=7 writes fill
+    // Order: mode, target, then four dspa=7 writes fill
     // {R2R,L2R,R2L,L2L}; distinct dB values tell the slots apart.
     write_dspa(v, 0); write_dspd(v, 0x80);  // mode
     write_dspa(v, 1); write_dspd(v, 0x93);  // target

@@ -142,7 +142,7 @@ size_t DvcVideo::input_bytes() const { return impl_->input.size(); }
 void DvcVideo::clear_fifo() {
     impl_->input.clear();
     mpeg2_reset(impl_->decoder.get(), /*full_reset=*/0); // keeps the sequence header
-    // mpeg_video.sv readyframes reset; the picture on screen stays.
+    // The output FIFO empties; the picture on screen stays.
     queue_.clear();
     decoder_held_pictures_ = 0;
     end_of_data_ = false;
@@ -173,7 +173,7 @@ bool DvcVideo::make_pending(const void* picture_buffer, PendingPicture& pending)
     if (seq == nullptr || index < 0 || fbuf->buf[0] == nullptr) return false;
     const PictureInfo info = picture_info_[size_t(index)];
 
-    // sw/mpeg_video/main.c push_frame(): nothing is shown before the first I picture.
+    // Nothing is shown before the first I picture.
     if (info.coding_type == PIC_FLAG_CODING_TYPE_I) intra_shown_ = true;
     if (!intra_shown_) return false;
     pending = {};
@@ -370,7 +370,7 @@ bool DvcVideo::present_next_frame() {
     queue_.pop_front();
     convert_presented();
     has_frame_ = true;
-    // EOD: mpeg_video.sv !for_display_valid && pictures_in_mpeg_decoder == 0.
+    // EOD: nothing left to show and nothing left in the decoder.
     if (queue_.empty() && end_of_data_ && decoder_held_pictures_ == 0 && !step_.active) last_picture_pending_ = true;
     return true;
 }

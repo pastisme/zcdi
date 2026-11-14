@@ -128,7 +128,7 @@ bool decode_xa_adpcm(const uint8_t* sector_audio_data, uint8_t coding, std::vect
     bool is_8bit = (bits_per_sample == 1);
     bool is_mono = (channels == 0);
 
-    // Mono uses history[0] only (same_cdi hardcodes channel 0).
+    // Mono uses history[0] only.
     std::vector<int16_t> native; // decoded at the coding's own native rate, mono or L,R,L,R...
     if (is_mono) {
         for (int g = 0; g < kGroupsPerSector; ++g) {

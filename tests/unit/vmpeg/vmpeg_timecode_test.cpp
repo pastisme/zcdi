@@ -1,4 +1,4 @@
-// CDi_MiSTer vmpeg.sv:527-533.
+// FMV decoder and display time code registers.
 #include "doctest.h"
 
 #include <cstdint>

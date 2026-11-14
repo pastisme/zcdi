@@ -5,7 +5,7 @@
 namespace zcdi {
 namespace mamecdi {
 
-// One pair for the CDIC's life (same_cdi m_xa_last); pass the same one to every call.
+// One pair for the CDIC's life; pass the same one to every call.
 struct History {
     int32_t s0 = 0, s1 = 0;
 };

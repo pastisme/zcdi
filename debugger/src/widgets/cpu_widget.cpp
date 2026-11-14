@@ -74,7 +74,5 @@ void CpuWidget::draw(AppState& state) {
         }
         ImGui::EndPopup();
     }
-    const std::string where = state.symbols.where(regs.pc);
-    if (!where.empty()) ImGui::TextDisabled("PC in %s", where.c_str());
     ImGui::End();
 }

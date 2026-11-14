@@ -38,7 +38,7 @@ std::chrono::sys_seconds host_local_time() {
 } // namespace
 
 // The calendar fields are always computed live, never read from the image
-// (as mk48t08b.sv), so a stale save can't freeze the clock.
+// so a stale save can't freeze the clock.
 std::chrono::sys_seconds Mk48t08::current_time() const {
     return std::chrono::sys_seconds{std::chrono::seconds{boot_wall_time_ + int64_t(elapsed_cycles_ / kCpuClockHz)}};
 }

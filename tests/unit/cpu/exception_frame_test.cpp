@@ -26,7 +26,7 @@ TEST_CASE("an address error pushes a Format 15 frame with the fault address") {
     const uint32_t sp = f.cpu.sp();
     const uint16_t vector_word = f.frame_vector_word();
     CHECK((vector_word & 0xf000) == 0xf000);  // Format 15 marker
-    // As MAME m68ki_exception_address_error: the bus error vector's offset.
+    // The bus error vector's offset.
     CHECK((vector_word & 0x0fff) == (2u << 2));
     CHECK(f.bus.read16(sp + 8) == 0);   // special status word
     CHECK(f.bus.read32(sp + 16) == 0);  // data output buffer

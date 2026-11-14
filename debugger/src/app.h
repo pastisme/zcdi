@@ -2,6 +2,7 @@
 
 #include "app_state.h"
 
+#include <cctype>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -15,6 +16,14 @@ struct sapp_event;
 struct ImGuiContext;
 struct ImGuiSettingsHandler;
 struct ImGuiTextBuffer;
+
+// Lower-case, with the dot: ".cue".
+inline std::string lower_extension(const std::string& path) {
+    std::string ext = std::filesystem::path(path).extension().string();
+    for (char& c : ext)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return ext;
+}
 
 class DebuggerWidget;
 namespace ImGui {
@@ -35,6 +44,9 @@ public:
     void event(const sapp_event* ev);
 
 private:
+    static constexpr const char* kDockspaceName = "zcdi_dockspace";
+    static constexpr std::size_t kMaxRecentDiscs = 8;
+
     // imgui.ini section holding which windows are open.
     static void* settings_open(ImGuiContext*, ImGuiSettingsHandler*, const char* name);
     static void settings_read_line(ImGuiContext*, ImGuiSettingsHandler* handler, void*, const char* line);
@@ -66,7 +78,6 @@ private:
     void update_emu_fps();
     void on_stop(EmuRunner::Stop why);
     void copy_framebuffer();
-    void load_symbols();
     void reset_machine(bool cold);
     void quick_save();
     void quick_load();

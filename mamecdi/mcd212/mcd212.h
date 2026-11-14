@@ -5,7 +5,7 @@
 namespace zcdi {
 namespace mamecdi {
 
-// Register values, as Mcd212SaveState and plane memory hold them (names after same_cdi).
+// Register values, as Mcd212SaveState and plane memory hold them.
 namespace mcd212 {
 
 // MMIO byte offsets from 0x4fffe0; the "1" registers are path 0.
@@ -32,7 +32,7 @@ enum CsrRead : uint8_t {
     kCsr1rDa = 0x80, // display active
 };
 
-// CSR1W/CSR2W. DI masks the IRQ1 pin only; IT1/IT2 still latch (mcd212.sv:203-204).
+// CSR1W/CSR2W. DI masks the IRQ1 pin only; IT1/IT2 still latch.
 enum CsrWrite : uint16_t {
     kCsr1wSt = 0x0002,
     kCsrWDi = 0x8000,
@@ -40,7 +40,7 @@ enum CsrWrite : uint16_t {
 
 // DCR1/DCR2, bits 0-5 being VSR's high address bits. SM, FD and CF are DCR1 only.
 enum Dcr : uint16_t {
-    kDcrDc = 0x0100, // DCA enable (mcd212.sv:499-513)
+    kDcrDc = 0x0100, // DCA enable
     kDcrIc = 0x0200, // ICA enable
     kDcrCm = 0x0800,
     kDcr1Sm = 0x1000, // scan mode: interlace
@@ -60,7 +60,7 @@ enum FileType : uint8_t {
     kDdrFtMosaic = 0x3, // Pixel Repeat
 };
 
-// ICA/DCA instructions, each the first opcode of its range (same_cdi process_ica).
+// ICA/DCA instructions, each the first opcode of its range.
 enum Command : uint8_t {
     kCmdStop = 0x00,
     kCmdNop = 0x10,
@@ -82,7 +82,7 @@ enum IcaStart : uint32_t {
 constexpr int kIcaMaxCommands = 1920; // 3840 16-bit words / 2 words-per-command
 constexpr int kDcaBudgetBytes = 64; // real hardware budgets exactly 64 bytes/line
 
-// Registers set by ICA/DCA instructions (same_cdi set_register).
+// Registers set by ICA/DCA instructions.
 enum Register : uint8_t {
     kRegClut = 0x80, // 0x80-0xbf: 64 entries of the selected bank
     kRegImageCodingMethod = 0xc0,
@@ -111,10 +111,10 @@ constexpr uint8_t kClutPlaneB = 0x80; // CLUT index of bank 2, plane B's half
 // CLUT entries and color keys hold 6 bits per channel.
 constexpr uint32_t kColorBits = 0x00fcfcfcu;
 
-// Image Coding Method flags (same_cdi ICM_*).
+// Image Coding Method flags.
 enum Icm : uint32_t {
     kIcmEv = 0x040000u, // External Video
-    kIcmNr = 0x080000u, // number of region flags (same_cdi ICM_NM)
+    kIcmNr = 0x080000u, // number of region flags
     kIcmCs = 0x400000u, // CLUT select
 };
 
@@ -129,7 +129,7 @@ enum CodingMethod : uint8_t {
     kIcmClut4 = 0xb, // CLUT4, or RL3 with run-length decode
 };
 
-// Transparency Control: a 4-bit condition per plane, plane B's at bit 8 (same_cdi TCR_*).
+// Transparency Control: a 4-bit condition per plane, plane B's at bit 8.
 constexpr int kTcrPlaneBShift = 8;
 enum TransparencyControl : uint32_t {
     kTcrAlways = 0x0,
@@ -149,7 +149,7 @@ enum TransparencyControl : uint32_t {
 constexpr uint8_t kPorBa = 0x01; // Plane Order: B in front of A
 constexpr uint32_t kPixelHoldEnable = 0x800000u;
 
-// Region Control fields (same_cdi RC_X/RC_WF/RC_RF_BIT/RC_OP).
+// Region Control fields.
 enum RegionControl : uint32_t {
     kRcX = 0x0003ffu, // Double Resolution column
     kRcWf = 0x00fc00u,
@@ -174,8 +174,7 @@ enum RegionOp : uint32_t {
     kRcOpWfBSetRf = 15,
 };
 
-// Cursor Control, per mcd212.sv's cursor_control_register (same_cdi's
-// CURCNT_CON 0x280000 is not contiguous). Periods are in units of 12 frames.
+// Cursor Control. Periods are in units of 12 frames.
 enum CursorControl : uint32_t {
     kCurcntColor = 0x00000fu, // a 4bpp palette index
     kCurcntCuw = 0x008000u, // 1 Double Resolution pixel per pattern bit, else 2
@@ -188,15 +187,15 @@ enum CursorControlShift : int {
     kCurcntCofShift = 16,
     kCurcntConShift = 19,
 };
-constexpr int kCursorBlinkSubPeriodFrames = 12; // mcd212.sv CURSOR_BLINK_PERIOD
+constexpr int kCursorBlinkSubPeriodFrames = 12;
 
-// Fixed palette for Backdrop Color and kCurcntColor, XRGB (same_cdi s_4bpp_color).
+// Fixed palette for Backdrop Color and kCurcntColor, XRGB.
 constexpr uint32_t k4bppColor[16] = {
     0x101010, 0x10107a, 0x107a10, 0x107a7a, 0x7a1010, 0x7a107a, 0x7a7a10, 0x7a7a7a,
     0x101010, 0x1010e6, 0x10e610, 0x10e6e6, 0xe61010, 0xe610e6, 0xe6e610, 0xe6e6e6,
 };
 
-// DYUV delta per 4-bit code (same_cdi s_dyuv_deltas).
+// DYUV delta per 4-bit code.
 constexpr uint8_t kDyuvDeltas[16] = {0, 1, 4, 9, 16, 27, 44, 79, 128, 177, 212, 229, 240, 247, 252, 255};
 
 } // namespace mcd212
@@ -250,7 +249,7 @@ struct Mcd212SaveState {
     int dvc_frame_height_ = 0;
 
     bool irq1_ = false;
-    // Interlace (DCR1.SM): video_timing.sv parity == 0, the field after an odd one.
+    // Interlace (DCR1.SM): the field after an odd one.
     bool even_field_ = false;
 
     bool state_valid() const;
@@ -319,7 +318,7 @@ public:
         }
     }
 
-    // With a DVC cartridge, EV backdrop pixels show its frame player (cditop.sv vsd).
+    // With a DVC cartridge, EV backdrop pixels show its frame player.
     void set_dvc_attached(bool attached) { dvc_attached_ = attached; }
 
     // FMV window (VmpegDevice::DisplayWindow), set every field with

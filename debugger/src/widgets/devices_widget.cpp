@@ -111,7 +111,7 @@ void draw_vmpeg(const zcdi::mamecdi::VmpegDevice& vmpeg, const zcdi::dvc::DvcVid
         ImGui::EndTable();
     }
     if (ImGui::CollapsingHeader("Decoder queue", ImGuiTreeNodeFlags_DefaultOpen) && begin_fields("dvc_queue")) {
-        field("Queued pictures", "%zu of %zu", video.queue_depth(), zcdi::dvc::DvcVideo::kMaxDecodedPictures);
+        field("Queued pictures", "%zu of %zu", video.queue_depth(), zcdi::dvc::DvcVideo::kOutputFifoPictures);
         field("Held in decoder", "%d", video.decoder_held_pictures());
         field("On screen", "%s  %dx%d", yes(video.has_frame()), video.width(), video.height());
         field("Shown time code", "%08X", video.presented_timecode());

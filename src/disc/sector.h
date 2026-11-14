@@ -16,7 +16,7 @@ enum : int {
     kForm2DataSize = 2324, // Mode 2 Form 2 user data
 };
 
-// Q subcode (Red Book): 12 bytes, CRC last (same_cdi SUBCODE_Q_CONTROL..SUBCODE_Q_CRC1).
+// Q subcode (Red Book): 12 bytes, CRC last.
 constexpr uint32_t kSubqSize = 12;
 constexpr uint32_t kSubcodeRwSize = 96;
 // CONTROL/ADR byte: ADR 1 (position), CONTROL 4 for a data track.
@@ -37,7 +37,7 @@ enum TocDiscType : uint8_t {
     kDiscTypeCdi = 0x10,
 };
 
-// XA subheader SUBMODE bits (Green Book; same_cdi SUBMODE_*).
+// XA subheader SUBMODE bits (Green Book).
 enum Submode : uint8_t {
     kSubmodeEor = 0x01,
     kSubmodeVideo = 0x02,
@@ -67,8 +67,8 @@ inline void lba_to_msf(int lba, int& m, int& s, int& f) {
     m = t;
 }
 
-// Compares the whole sync field: same_cdi/MAME check only two bytes, which a
-// CD-DA sector starting with the sample 255 matches too.
+// Compares the whole sync field: two bytes alone also match a CD-DA sector
+// starting with the sample 255.
 inline bool sector_looks_byteswapped(const uint8_t* data) {
     static constexpr uint8_t kSwappedSync[12] = {0xff, 0x00, 0xff, 0xff, 0xff, 0xff,
                                                  0xff, 0xff, 0xff, 0xff, 0x00, 0xff};

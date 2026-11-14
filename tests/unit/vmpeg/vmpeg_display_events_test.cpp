@@ -1,4 +1,4 @@
-// CDi_MiSTer mpeg_video.sv latch_frame_until_vblank: picture events at the end of vertical blanking.
+// Picture events at the end of vertical blanking.
 #include "doctest.h"
 
 #include <cstdint>

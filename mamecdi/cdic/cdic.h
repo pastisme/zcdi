@@ -9,7 +9,7 @@
 namespace zcdi {
 namespace mamecdi {
 
-// Register values, as CdicSaveState and CDIC RAM hold them (names after same_cdi).
+// Register values, as CdicSaveState and CDIC RAM hold them.
 namespace cdic {
 
 // Register byte offsets from 0x303c00 (high byte first).
@@ -27,7 +27,7 @@ enum RegisterOffset : uint32_t {
     kRegDbuf = 0x3fe,
 };
 
-// Command register, low byte (same_cdi handle_cdic_command).
+// Command register, low byte.
 enum Command : uint8_t {
     kCmdIdle = 0x00, // as disc_command_ only
     kCmdResetMode1 = 0x23,
@@ -53,7 +53,7 @@ enum Dbuf : uint16_t {
     kDbufTrigger = 0x8000, // write: run the command register
 };
 
-// AUDCTL (cdic.sv).
+// AUDCTL.
 enum Audctl : uint16_t {
     kAudctlStoppedOnEnd = 0x0001, // the player met kAudioMapEnd; cleared by reading
     kAudctlRun = 0x0800,
@@ -64,13 +64,13 @@ enum Audctl : uint16_t {
 enum RamLayout : uint32_t {
     kDataBank0 = 0x0000,
     kDataBank1 = 0x0a00,
-    kCddaBank0 = 0x1400, // cdic.sv read_raw: words 0x0a00/0x0f00
+    kCddaBank0 = 0x1400, // CD-DA sectors land at words 0x0a00/0x0f00
     kCddaBank1 = 0x1e00,
     kAudioMap0 = 0x2800,
     kAudioMap1 = 0x3200,
 };
-// A data bank holds the sector from its header on, split at FILE2 (same_cdi
-// SECTOR_FILE2) where Mode 2 audio skips to the audio bank, then the Q subcode
+// A data bank holds the sector from its header on, split at FILE2,
+// where Mode 2 audio skips to the audio bank, then the Q subcode
 // one byte per word.
 constexpr uint32_t kFile2Offset = 20;
 constexpr uint32_t kSubqOffset = (kFile2Offset - kSyncSize) + (kRawSectorSize - kFile2Offset);
@@ -93,7 +93,7 @@ struct CdicSaveState {
     uint16_t command_ = 0;
     uint32_t time_ = 0; // BCD MSF target (Time MSW<<16 | Time LSW)
     uint16_t file_ = 0;
-    // Reset default is all channels selected (same_cdi device_reset).
+    // Reset default is all channels selected.
     uint32_t channel_ = 0xffffffffu; // 32-bit channel bitmask
     uint16_t audio_channel_ = 0xffffu;
     uint16_t audio_buffer_ = 0; // ABUF, cdic::kBufReady = audio-ready
@@ -103,8 +103,7 @@ struct CdicSaveState {
     uint16_t data_buffer_ = 0; // cdic::Dbuf
     uint16_t dma_control_ = 0; // low 14 bits = starting word offset into CDIC RAM for a DMA transfer
 
-    // cdic.sv data_target_buffer/audio_target_buffer: not part of DBUF, a
-    // CPU DBUF write doesn't move them (only a bit14-clear write resets both).
+    // Not part of DBUF: a CPU DBUF write doesn't move them (only a bit14-clear write resets both).
     bool data_target_buffer_ = false;
     bool audio_target_buffer_ = false;
 
@@ -115,10 +114,10 @@ struct CdicSaveState {
     int curr_lba_ = 0;
     int spinup_counter_ = 0;
     int sector_cycle_accum_ = 0; // fractional cycles carried between tick_cycles calls
-    // Sector ticks until XBUF bit 15 after Stop/Update (cdic.sv spin_down_cnt); 0 = none.
+    // Sector ticks until XBUF bit 15 after Stop/Update; 0 = none.
     int spin_down_count_ = 0;
     int spin_down_cycle_accum_ = 0;
-    // Sector ticks until a read or seek clears DBUF bit 15 (cdic.sv dbuf15_reset_cnt); 0 = none.
+    // Sector ticks until a read or seek clears DBUF bit 15; 0 = none.
     int dbuf_trigger_reset_count_ = 0;
 
     int read_fail_streak_ = 0;
@@ -136,7 +135,7 @@ struct CdicSaveState {
 
     AdpcmResampleState adpcm_resample_state_;
 
-    // Reset when the player starts from idle (cdic.sv reset_filter_on_start).
+    // Reset when the player starts from idle.
     History adpcm_history_[2];
 };
 
@@ -187,7 +186,7 @@ private:
     bool is_mode2_audio_selected(const RawSector& s) const;
     void pack_into_ram(const RawSector& s);
     void pack_cdda_into_ram(const RawSector& s, const uint8_t* subq, const uint8_t* subcode_rw);
-    // Flips the data toggle into DBUF bit 0; true = bank 1 (cdic.sv:559-582).
+    // Flips the data toggle into DBUF bit 0; true = bank 1.
     bool next_data_bank();
     // A sector is in RAM: XBUF bit 15, DBUF bit 14, IN4.
     void signal_sector();

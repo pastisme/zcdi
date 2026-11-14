@@ -25,7 +25,7 @@ namespace {
 constexpr int kWidth = 768; // Double Resolution pixels, see Mcd212::kFbWidth
 constexpr int kHeight = 280;
 constexpr int kMaxHeight = 560; // interlaced fields woven, see Mcd212::framebuffer()
-constexpr float kAspect = 4.0f / 3.0f; // as CDi_MiSTer's scaler shows it
+constexpr float kAspect = 4.0f / 3.0f;
 constexpr int kSampleRate = 44100;
 
 retro_environment_t env_cb = nullptr;

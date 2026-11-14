@@ -5,7 +5,7 @@
 namespace zcdi {
 
 // third_party/playcdi/playcdi.mod (CD-i Fan, 2005, LGPL), byte for byte.
-// Mapped at 0xf00000 under Auto Play (cditop.sv rom_playcdi); its AttrRev
+// Mapped at 0xf00000 under Auto Play; its AttrRev
 // 255 makes F$Load prefer it over the ROM "play" module.
 static constexpr uint8_t kPlayCdiOverlayCode[] = {
     0x4a, 0xfc, 0x00, 0x01, 0x00, 0x00, 0x00, 0x68, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x48, 0x05, 0x55,

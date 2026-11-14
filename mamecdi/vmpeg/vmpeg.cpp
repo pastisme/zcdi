@@ -99,27 +99,26 @@ namespace {
 
 // 45 kHz dclk ticks from SYSCMD to playback starting or pausing.
 enum DclkDelay : uint32_t {
-    kPauseDelayTicks = 100, // ~2.2 ms, vmpeg.sv:894-895
+    kPauseDelayTicks = 100, // ~2.2 ms
     kPlayStartDelayTicks = 1000, // ~22 ms, Play/Continue
     kScrLoadTicks = 15, // pack SCR into fmv_dclk unless the CPU writes GEN_SYSCR first
 };
 
-// mpeg_video.sv totally_out_of_sync_need_frameskip, 90 kHz.
+// Pack SCR past the head picture's DTS by more than this (90 kHz): play at the shortest period.
 constexpr int64_t kOutOfSyncThreshold = 15000;
-// mpeg_video.sv keep_synchronizer_cnt: pictures without a DTS keep the last desync.
+// Pictures without a DTS keep the last desync for this many pictures.
 constexpr uint8_t kDesyncHoldPictures = 3;
 
-// mpeg_video.sv display_dts_desync: dclk[20:6] - DTS[21:7], 15-bit signed.
+// dclk[20:6] - DTS[21:7], 15-bit signed.
 int dts_desync(uint32_t dclk, int64_t dts) {
     int d = int((dclk >> 6) & 0x7fff) - int((uint64_t(dts) >> 7) & 0x7fff);
     d &= 0x7fff;
     return d >= 0x4000 ? d - 0x8000 : d;
 }
 
-// vmpeg.sv:531/698
 constexpr uint32_t kTimerCntMask = (1u << 21) - 1;
 
-// dsp_registers.sv db_to_linear: 10^(-db/20) * 256 * 9/16; >60 (incl. mute bit 7) is 0.
+// 10^(-db/20) * 256 * 9/16; >60 (incl. mute bit 7) is 0.
 uint8_t db_to_linear(uint8_t db) {
     static constexpr uint8_t kTable[61] = {
         144, 128, 114, 102, 91, 81, 72, 64, 57, 51, 46, 41, 36, 32, 29, 26, 23, 20, 18, 16, 14,
@@ -144,33 +143,33 @@ uint16_t VmpegDevice::read_word(uint32_t word_index) const {
     switch (word_index) {
         case kFmaCmd: return fma_command_register_;
         case kFmaStatus: return (uint16_t(0x02) << 8) | fma_status_register_;
-        case 0x1802: return 0x0007; // vmpeg.sv:458
-        case 0x1803: return 0x0900; // vmpeg.sv:459
+        case kFmaFixed04: return 0x0007;
+        case kFmaFixed06: return 0x0900;
         case kFmaStreamW:
         case kFmaStreamR: return fma_stream_number_ & 0xf;
         case kFmaIvec: return fma_interrupt_vector_register_;
-        case 0x1807: return 0x0042; // vmpeg.sv:463
+        case kFmaFixed0e: return 0x0042;
         case kFmaDclkH: return uint16_t(fma_dclk_ >> 16);
         case kFmaDclkL: return fma_dclkl_latch_;
-        case kFmaAudioHdrH: return uint16_t(fma_mpeg_audio_header_ >> 16); // vmpeg.sv:517
+        case kFmaAudioHdrH: return uint16_t(fma_mpeg_audio_header_ >> 16);
         case kFmaAudioHdrL: return uint16_t(fma_mpeg_audio_header_);
         case kFmaRun: return audio_dsp_enabled() ? 1 : 0;
         case kFmaIsr: return fma_interrupt_status_register_;
         case kFmaIer: return fma_interrupt_enable_register_;
-        case kFmaDspd: return 0x0004; // vmpeg.sv:471
+        case kFmaDspd: return 0x0004;
 
         case kFmvImageWidth: return image_width_;
         case kFmvImageHeight: return image_height_;
         case kFmvImageRt: return image_rt_;
         case kFmvDecoderTimecodeHi: return uint16_t(fmv_decoder_timecode_ >> 16);
         case kFmvDecoderTimecodeLo: return uint16_t(fmv_decoder_timecode_);
-        case kFmvDisplayW: return display_width_ & 0x7ff; // vmpeg.sv:529
+        case kFmvDisplayW: return display_width_ & 0x7ff;
         case kFmvDisplayH: return display_height_ & 0x1ff;
         case kFmvPicRt: return display_frameperiod_rawhdr_;
         case kFmvDisplayTimecodeHi: return uint16_t(fmv_display_timecode_ >> 16);
         case kFmvDisplayTimecodeLo: return uint16_t(fmv_display_timecode_);
         case kFmvTempref: return fmv_display_video_status_; // SYS_VSR, displayed picture
-        case kFmvSysSts: return fmv_input_fifo_full() ? 0 : kSysStsFifoNotFull; // vmpeg.sv:523
+        case kFmvSysSts: return fmv_input_fifo_full() ? 0 : kSysStsFifoNotFull;
         case kFmvIer: return fmv_interrupt_enable_register_;
         case kFmvIsr: return fmv_interrupt_status_register_;
         case kFmvTcnt: return fmv_timer_compare_register_;
@@ -187,26 +186,25 @@ uint16_t VmpegDevice::read_word(uint32_t word_index) const {
         case kFmvGenDecCmd: return fmv_decoder_command_;
         case kFmvGenVdiCmd: return fmv_video_data_input_command_register_;
         case kFmvGenSyscr: return uint16_t(fmv_dclk_ >> 6) & 0x7fff; // bit 21 reads 0: the driver's SCR sign
-        case kFmvGenSyncDiff: return 0; // vmpeg.sv:501
-        case kFmvGenDecDelay: return 1; // older RTL revisions: 0xfe96
+        case kFmvGenSyncDiff: return 0;
+        case kFmvGenDecDelay: return 1;
         case kFmvDts: return fmv_dts_register();
         case kFmvPicsInFifo: return fmv_pictures_in_fifo();
-        case kFmvPicRate: // twice the display rate until a picture is decoded (vmpeg.sv fmv_picture_rate)
+        case kFmvPicRate: // twice the display rate until a picture is decoded
             return decoder_frameperiod_90khz_ != 0 ? decoder_frameperiod_90khz_ : uint16_t(fmv_display_rate() << 1);
         case kFmvDisplayRate: return fmv_display_rate();
-        case kFmvFrameRate: return 1; // vmpeg.sv approximation, "allow window updates"; writes ignored
+        case kFmvFrameRate: return 1; // always allows window updates; writes ignored
         case kFmvSyscmd: return fmv_system_command_register_;
         case kFmvVidcmd: return fmv_video_command_register_;
         case kFmvStreamNum: return fmv_stream_number_ & 0xf;
         case kFmvIvec: return fmv_interrupt_vector_register_;
-        case kFmvMmuBase: return 0; // vmpeg.sv:513
+        case kFmvMmuBase: return 0;
 
         default: return 0;
     }
 }
 
 void VmpegDevice::handle_fmv_syscmd_write(uint16_t value) {
-    // vmpeg.sv:836-949
     fmv_system_command_register_ = value;
 
     if (value & kSysCmdPlay) {
@@ -239,8 +237,7 @@ void VmpegDevice::handle_fmv_syscmd_write(uint16_t value) {
     if (value & kSysCmdClearFifo) {
         reset_fmv_pipeline();
         clear_fifo_pending_ = true;
-        // fmv_dsp_enable drops for a cycle, then restart_fmv_dsp_enable.
-        fmv_dsp_enable_ = true;
+        fmv_dsp_enable_ = true; // drops for one clock on hardware, then back on
     }
     if (value & kSysCmdDecoderOn) {
         fmv_dsp_enable_ = true;
@@ -249,7 +246,7 @@ void VmpegDevice::handle_fmv_syscmd_write(uint16_t value) {
         // The input FIFO, demuxer and frame queue are held in reset.
         reset_fmv_pipeline();
         fmv_dsp_enable_ = false;
-        // fmv_reset_persistent_storage drops the latched picture (frameplayer.sv:44).
+        // Also drops the picture held for display.
         decoder_off_pending_ = true;
         fmv_es_has_sequence_header_ = false; // as DvcVideo::decoder_off()
         fmv_decoder_active_ = false;
@@ -258,7 +255,7 @@ void VmpegDevice::handle_fmv_syscmd_write(uint16_t value) {
         image_height_ = 0;
         image_rt_ = 0;
     }
-    if (value & kSysCmdStartDma) { // vmpeg.sv:944-946
+    if (value & kSysCmdStartDma) {
         dma_for_fma_ = false;
         dma_active_ = true;
     }
@@ -280,7 +277,7 @@ void VmpegDevice::reset_fmv_pipeline() {
     player_predicted_dts_valid_ = false;
     player_step_latch_ = false;
     player_latch_pending_ = false;
-    player_playback_active_delayed_ = false; // reset_dsp_enabled
+    player_playback_active_delayed_ = false;
     fmv_decoder_timecode_ = 0;
     fmv_display_timecode_ = 0;
     fmv_display_video_status_ = 0;
@@ -289,7 +286,6 @@ void VmpegDevice::reset_fmv_pipeline() {
 }
 
 void VmpegDevice::handle_fmv_vidcmd_write(uint16_t value) {
-    // vmpeg.sv:950-981
     fmv_video_command_register_ = value;
 
     if (value & kVidCmdRegsUpd) {
@@ -309,7 +305,7 @@ void VmpegDevice::handle_fmv_vidcmd_write(uint16_t value) {
 }
 
 void VmpegDevice::handle_fmv_gen_dec_cmd_write(uint16_t value) {
-    // vmpeg.sv:1034-1042, ported as-is (the RTL marks it "very unsure about this").
+    // A 0x22xx command outside pause steps one picture; how real hardware decides this is not known.
     fmv_decoder_command_ = value;
     if ((value >> 8) == 0x22 && !(fmv_system_command_register_ & kSysCmdPause)) player_step_latch_ = true;
 }
@@ -326,16 +322,16 @@ void VmpegDevice::write_word(uint32_t word_index, uint16_t value, bool completin
             fma_command_register_ = value;
             if (!completing) break;
             if (value & kFmaCmdStartDma) {
-                // Clears underflow (Green Book 8.2.4.3.3, vmpeg.sv:772-775).
+                // Clears underflow (Green Book 8.2.4.3.3).
                 fma_status_register_ &= ~kFmaStatusUnderflow;
-                dma_for_fma_ = true; // vmpeg.sv:769-770
+                dma_for_fma_ = true;
                 dma_active_ = true;
             }
             if (value & kFmaCmdStop) {
                 fma_status_register_ = 0; // also ends decoding
-                fma_es_bytes_.clear(); // input FIFO reset, vmpeg.sv:852
+                fma_es_bytes_.clear(); // input FIFO reset
                 fma_sniff_bytes_.clear();
-                fma_mpeg_audio_header_ = 0; // reset with it, mpeg_audio.sv:63-66
+                fma_mpeg_audio_header_ = 0; // reset with it
                 audio_reset_pending_ = true;
                 fma_unplayed_samples_ = 0;
                 reset_fma_playback_timer();
@@ -353,7 +349,6 @@ void VmpegDevice::write_word(uint32_t word_index, uint16_t value, bool completin
         case kFmaIer: fma_interrupt_enable_register_ = value; break;
         case kFmaDspa: fma_dspa_ = uint8_t(value & 0xff); break;
         case kFmaDspd: {
-            // dsp_registers.sv.
             if (!completing) break;
             uint8_t dspd = uint8_t(value & 0xff);
             const bool targeting_volume = (fma_dsp_mode_ == kDspModeVolume && fma_dsp_target_ == kDspTargetVolume);
@@ -361,7 +356,7 @@ void VmpegDevice::write_word(uint32_t word_index, uint16_t value, bool completin
                 case 0: fma_dsp_mode_ = dspd; break;
                 case 1:
                     fma_dsp_target_ = dspd;
-                    // The RTL resets only if target already held it; same for well-formed sequences.
+                    // Strictly only when the target already held it; the same for well-formed sequences.
                     if (fma_dsp_mode_ == kDspModeVolume && dspd == kDspTargetVolume) fma_dsp_write_index_ = 0;
                     break;
                 default: break;
@@ -381,9 +376,9 @@ void VmpegDevice::write_word(uint32_t word_index, uint16_t value, bool completin
         }
 
         case kFmvIer: fmv_interrupt_enable_register_ = value; break;
-        case kFmvIsr: break; // vmpeg.sv:824-826
+        case kFmvIsr: break; // cleared by reading
         case kFmvXfer: {
-            // High byte first (vmpeg.sv:55). Bytes for the FMA are dropped: no driver sends any.
+            // High byte first. Bytes for the FMA are dropped: no driver sends any.
             if (!completing) {
                 fmv_xfer_pending_high_ = uint8_t(value >> 8);
             } else if (!dma_for_fma_) {
@@ -440,7 +435,7 @@ void VmpegDevice::write_word(uint32_t word_index, uint16_t value, bool completin
     }
 
     if ((word_index & ~uint32_t(0xff)) == 0x0800) {
-        // VCD register, 0xe01xxx (vmpeg.sv:750-754).
+        // VCD register, 0xe01xxx.
         vcd_pixel_clock_ = (value & 1) != 0;
     }
 }
@@ -451,12 +446,12 @@ uint8_t VmpegDevice::read_byte(uint32_t offset) {
     uint32_t word_index = offset >> 1;
     uint16_t w = read_word(word_index);
     uint8_t out = (offset & 1) ? uint8_t(w) : uint8_t(w >> 8);
-    // Clear-on-read ISRs (vmpeg.sv:726-735), on the low byte, after `w` was read.
+    // Clear-on-read ISRs, on the low byte, after `w` was read.
     bool completing = (offset & 1) != 0;
     if (completing) {
         if (word_index == kFmaIsr) fma_interrupt_status_register_ = 0;
         if (word_index == kFmvIsr) fmv_interrupt_status_register_ = 0;
-        // vmpeg.sv:809-810: reading DCLK high latches the low word.
+        // Reading DCLK high latches the low word.
         if (word_index == kFmaDclkH) fma_dclkl_latch_ = uint16_t(fma_dclk_);
     }
     return out;
@@ -480,10 +475,10 @@ void VmpegDevice::tick_cycles(int cpu_cycles) {
 
         fma_dclk_ += 1;
         fmv_dclk_ += 1;
-        // vmpeg.sv: the demuxer sets the FMV DCLK too (45 kHz, so SCR / 2).
+        // The demuxer sets the FMV DCLK too (45 kHz, so SCR / 2).
         if (fmv_scr_load_countdown_ > 0 && --fmv_scr_load_countdown_ == 0) fmv_dclk_ = uint32_t(fmv_demux_.scr >> 1);
 
-        // mpeg_playback_timer.sv compares for equality; a past start time fires at once.
+        // Hardware compares for equality; a start time already past fires at once here.
         if (fma_start_valid_ && int32_t(fma_dclk_ - fma_start_dclk_) >= 0) {
             fma_start_valid_ = false;
             if (!audio_dsp_enabled()) set_audio_decoding_started();
@@ -510,13 +505,13 @@ void VmpegDevice::tick_cycles(int cpu_cycles) {
 }
 
 void VmpegDevice::notify_vsync() {
-    // Each call is one vsync edge (vmpeg.sv:608).
+    // Each call is one vsync edge.
     fmv_interrupt_status_register_ |= kIntVsync;
     fmv_line_ = 0;
     ndat_line_pending_ = false;
     if (!register_update_latch_) return;
 
-    // vmpeg.sv (a59880a): every RegsUpd is taken at vsync, with VCUP and DCL.
+    // Every RegsUpd is taken at vsync, with VCUP and DCL.
     register_update_latch_ = false;
     fmv_interrupt_status_register_ |= kIntVcup | kIntDcl;
     if (register_update_scroll_) {
@@ -556,7 +551,7 @@ bool VmpegDevice::in_vertical_blank() const {
     return fmv_line_ < fmv_first_active_line_ || fmv_line_ >= fmv_first_active_line_ + fmv_active_lines_;
 }
 
-// frameplayer.sv window_scan_started: the window's first line has been drawn this field.
+// The window's first line has been drawn this field.
 bool VmpegDevice::window_scan_started() const {
     return fmv_show_on_next_video_frame_ && !in_vertical_blank() &&
            fmv_line_ >= fmv_first_active_line_ + int(latched_window_.display_offset_x);
@@ -566,12 +561,11 @@ void VmpegDevice::notify_line(int line, int first_active_line, int active_lines)
     fmv_line_ = line + 1;
     fmv_first_active_line_ = first_active_line;
     fmv_active_lines_ = active_lines;
-    // mpeg_video.sv hsync_cnt == 11.
     if (ndat_line_pending_ && fmv_line_ == 11) {
         ndat_line_pending_ = false;
         fmv_interrupt_status_register_ |= kIntNdat;
     }
-    // mpeg_video.sv latch_frame_until_vblank: the picture starts display with the first active line.
+    // The picture starts display with the first active line.
     if (line + 1 == first_active_line && fmv_display_events_pending_ != 0) {
         fmv_interrupt_status_register_ |= fmv_display_events_pending_;
         fmv_display_events_pending_ = 0;
@@ -590,7 +584,7 @@ int VmpegDevice::iack_vector() const {
     return (fmv_interrupt_vector_register_ >> 3) & 0xff;
 }
 
-// X and Y swapped as in the RTL (vmpeg.sv:160-165), 9 bits each.
+// SCRPOS X and Y are latched swapped, 9 bits each.
 FmvWindow VmpegDevice::live_window() const {
     return {
         .display_offset_y = uint16_t(video_ctrl_x_display_ & 0x1ff),
@@ -616,11 +610,11 @@ void VmpegDevice::set_video_frame_ready(int width, int height) {
 }
 
 void VmpegDevice::set_video_frame_decoded(int picture_rate_code) {
-    // vmpeg.sv:653-657, mpeg_video.sv:894-896. 90000 / rate (CDi_MiSTer sw/mpeg_video/pl_mpeg.h).
+    // 90000 / picture rate, indexed by the sequence header's picture_rate code.
     static constexpr uint16_t kPeriod90khz[16] = {
         100, 3753, 3750, 3600, 3003, 3000, 1800, 1501, 1500, 100, 100, 100, 100, 100, 100, 100,
     };
-    // PLM_VIDEO_PICTURE_RATE_30MHZ (CDi_MiSTer sw/mpeg_video/pl_mpeg.h).
+    // The same period in 30 MHz clocks.
     static constexpr uint32_t kPeriod30mhz[16] = {
         10000,  1251251, 1250000, 1200000, 1001001, 1000000, 600000, 500500,
         500000, 10000,   10000,   10000,   10000,   10000,   10000,  10000,
@@ -665,8 +659,8 @@ void VmpegDevice::set_audio_decoding_started() {
 void VmpegDevice::set_audio_underflow() {
     fma_status_register_ |= kFmaStatusUnderflow;
     fma_interrupt_status_register_ |= kFmaIntUnf;
-    fma_status_register_ &= ~kFmaStatusDecoding; // vmpeg.sv:743-745, with fma_dsp_enable
-    reset_fma_playback_timer(); // vmpeg.sv fma_play_start .reset
+    fma_status_register_ &= ~kFmaStatusDecoding;
+    reset_fma_playback_timer();
 }
 
 // UNF at the first field ending with the decoded audio played out.
@@ -706,7 +700,7 @@ void VmpegDevice::fma_demux_byte(uint8_t b) {
                 fma_demux_mode_ = kDemuxModeProgram;
                 fma_sniff_bytes_.clear();
             }
-        } else if (b == kProgramEnd) { // mpeg_demuxer.sv:231
+        } else if (b == kProgramEnd) {
             if (fma_demux_mode_ == kDemuxModeProgram) set_audio_program_end();
         }
         d.begin(b);
@@ -723,7 +717,7 @@ void VmpegDevice::fma_demux_byte(uint8_t b) {
 void VmpegDevice::set_audio_frame_decoded(uint32_t header) {
     fma_status_register_ |= kFmaStatusFrame;
     fma_interrupt_status_register_ |= kFmaIntFrame;
-    // CSU follows the pending flag, so an unread one clears (vmpeg.sv:719-720).
+    // CSU follows the pending flag, so an unread one clears.
     fma_interrupt_status_register_ = (fma_interrupt_status_register_ & ~unsigned(kFmaIntCsu)) |
                                      (fma_stream_change_pending_ ? unsigned(kFmaIntCsu) : 0u);
     fma_stream_change_pending_ = false;
@@ -747,19 +741,18 @@ void VmpegDevice::set_video_display_picture_rate(int picture_rate_code) {
 }
 
 bool VmpegDevice::fmv_input_fifo_full() const {
-    // Demuxed bytes still here count too: the RTL writes them straight into the FIFO.
+    // Demuxed bytes still here count too: hardware writes them straight into the FIFO.
     return fmv_decoder_input_bytes_ + fmv_es_bytes_.size() > kFmvInputFifoFullBytes;
 }
 
 uint16_t VmpegDevice::fmv_pictures_in_fifo() const {
-    // mpeg_video.sv pictures_in_fifo: until Play, every picture received, as if nothing was decoded yet.
+    // Until Play, every picture received, as if nothing was decoded yet.
     if (!fmv_decoder_active_) return fmv_pictures_received_;
     const int count = int(fmv_dts_fifo_.size());
     return uint16_t(std::min(count > 1 ? count - 1 : count, 0x7f));
 }
 
 bool VmpegDevice::video_display_enabled() {
-    // mpeg_video.sv:936-944
     if (!fmv_playback_active_) {
         fmv_dts_start_satisfied_ = false;
         return false;
@@ -774,7 +767,7 @@ bool VmpegDevice::video_display_enabled() {
 
 void VmpegDevice::note_picture_displayed() {
     if (fmv_dts_fifo_.empty()) return;
-    // mpeg_video.sv predicted_dts: the last DTS plus a picture period per picture after it.
+    // Predicted DTS: the last DTS plus a picture period per picture after it.
     const int64_t head = fmv_dts_fifo_.front();
     if (head != 0 && decoder_frameperiod_90khz_ != 0) {
         player_predicted_dts_ = head + decoder_frameperiod_90khz_;
@@ -787,20 +780,20 @@ void VmpegDevice::note_picture_displayed() {
     fmv_dts_fifo_.erase(fmv_dts_fifo_.begin());
 }
 
-// Its DTS leaves the dts_fifo like a shown picture's (mpeg_video.sv dts_fifo strobe).
+// Its DTS leaves the DTS FIFO like a shown picture's.
 void VmpegDevice::note_picture_discarded() { note_picture_displayed(); }
 
 VmpegDevice::FramePlayerStep VmpegDevice::frame_player_field(uint32_t field_clocks, size_t pictures_ready) {
     FramePlayerStep step;
     const bool counting = video_display_enabled(); // also keeps the start latch
-    // Step: armed at one vsync, shown at the next, playing or not (mpeg_video.sv:962-965).
+    // Step: armed at one vsync, shown at the next, playing or not.
     auto arm_step = [&] {
         if (player_step_latch_ && pictures_ready > size_t(step.show)) {
             player_step_latch_ = false;
             player_latch_pending_ = true;
         }
     };
-    // The rising edge against playback_active_delayed arms NDAT; nothing disarms it but NDAT.
+    // Playback starting arms NDAT; nothing disarms it but NDAT.
     if (fmv_playback_active_ && !player_playback_active_delayed_) ndat_armed_ = true;
     if (!fmv_playback_active_) {
         player_frame_cnt_ = 0;
@@ -812,13 +805,13 @@ VmpegDevice::FramePlayerStep VmpegDevice::frame_player_field(uint32_t field_cloc
     }
     const bool synchronous = (fmv_system_control_register_ & kSysScrSynchronous) != 0;
     const bool head_has_dts = !fmv_dts_fifo_.empty() && fmv_dts_fifo_.front() != 0;
-    // totally_out_of_sync_need_frameskip: now only forces the shortest period.
+    // Far out of sync: only forces the shortest period.
     const bool out_of_sync =
         head_has_dts && fmv_demux_scr_valid_ && fmv_demux_.scr - fmv_dts_fifo_.front() > kOutOfSyncThreshold;
     if (counting) {
         player_frame_cnt_ += field_clocks;
         for (;;) {
-            // sw/mpeg_video/main.c multiplies the period by the slow-motion factor.
+            // Slow motion multiplies the period.
             const int64_t period = int64_t(player_frame_period_) * (fmv_slow_motion_ + 1);
             // Speed control stays within 1/8 of the period, as measured on a VMPEG.
             const int64_t shortest = period - period / 8, longest = period + period / 8;
@@ -828,10 +821,10 @@ VmpegDevice::FramePlayerStep VmpegDevice::frame_player_field(uint32_t field_cloc
             if (top < 1) top = 1;
             if (player_frame_cnt_ < top) break;
             player_frame_cnt_ -= top + 1;
-            if (period <= 1200) continue; // mpeg_video.sv only latches above this
+            if (period <= 1200) continue; // no picture latched at periods this short
             player_latch_pending_ = true;
             player_playback_active_delayed_ = true;
-            if (pictures_ready == 0) continue; // frame_period_tick needs a picture waiting
+            if (pictures_ready == 0) continue; // desync is measured only with a picture waiting
             // dclk at the wrap, player_frame_cnt_ 30 MHz clocks before the field end.
             const uint32_t dclk_at_wrap = fmv_dclk_ - uint32_t(player_frame_cnt_ * 3 / 2000);
             update_player_desync(dclk_at_wrap, synchronous);
@@ -846,7 +839,7 @@ VmpegDevice::FramePlayerStep VmpegDevice::frame_player_field(uint32_t field_cloc
     return step;
 }
 
-// mpeg_video.sv display_dts_desync_q at frame_period_tick, against the head's DTS
+// Desync at a picture period wrap, against the head's DTS
 // or, without one, the predicted DTS; a measurement holds for 3 more pictures.
 void VmpegDevice::update_player_desync(uint32_t dclk, bool synchronous) {
     const bool head_has_dts = !fmv_dts_fifo_.empty() && fmv_dts_fifo_.front() != 0;
@@ -867,7 +860,7 @@ void VmpegDevice::reset_fmv_demux() {
     fmv_es_shift_ = 0xffffffff;
     fmv_next_picture_dts_ = 0;
     fmv_demux_scr_valid_ = false;
-    fmv_demuxer_dts_ = 0; // mpeg_demuxer.sv:62
+    fmv_demuxer_dts_ = 0;
 }
 
 void VmpegDevice::fmv_es_byte(uint8_t b) {
@@ -891,7 +884,7 @@ void VmpegDevice::fmv_es_byte(uint8_t b) {
 }
 
 void VmpegDevice::fmv_demux_byte(uint8_t b) {
-    if (!fmv_dsp_enable_) return; // the demuxer is held in reset (vmpeg.sv:244)
+    if (!fmv_dsp_enable_) return; // the demuxer is held in reset
     if (fmv_demux_mode_ == kDemuxModeElementary) {
         fmv_es_byte(b);
         return;
@@ -911,7 +904,7 @@ void VmpegDevice::fmv_demux_byte(uint8_t b) {
             if (b != kPackStart) return;
             fmv_demux_mode_ = kDemuxModeProgram;
         }
-        if (b == kProgramEnd) { // mpeg_demuxer.sv:231 and vmpeg.sv:696
+        if (b == kProgramEnd) {
             set_video_program_end();
             fmv_program_end_pending_ = true;
         }
@@ -924,7 +917,7 @@ void VmpegDevice::fmv_demux_byte(uint8_t b) {
         fmv_scr_load_countdown_ = kScrLoadTicks;
     }
     if (events & PsDemux::kLastTimestamp) {
-        // The last 5 bytes: DTS if present, else PTS (mpeg_demuxer.sv).
+        // The last 5 bytes: DTS if present, else PTS.
         fmv_demuxer_dts_ = d.timestamp();
         fmv_next_picture_dts_ = fmv_demuxer_dts_;
         fmv_video_data_input_command_register_ |= kVdiTimestampUpdated;
@@ -933,7 +926,7 @@ void VmpegDevice::fmv_demux_byte(uint8_t b) {
 }
 
 VmpegDevice::DisplayWindow VmpegDevice::display_window() const {
-    // display_offset_y holds X (vmpeg.sv:160-165).
+    // display_offset_y holds X.
     const FmvWindow& w = latched_window_;
     return {
         .scrpos_x = w.display_offset_y,
@@ -952,7 +945,7 @@ std::vector<uint8_t> VmpegDevice::drain_fmv_es_bytes() { return std::exchange(fm
 std::vector<uint8_t> VmpegDevice::drain_fma_es_bytes() { return std::exchange(fma_es_bytes_, {}); }
 
 void VmpegDevice::feed_dma_word(uint16_t word) {
-    // High byte first (vmpeg.sv:50-56).
+    // High byte first.
     if (dma_for_fma_) {
         fma_input_byte(uint8_t(word >> 8));
         fma_input_byte(uint8_t(word));
@@ -963,7 +956,7 @@ void VmpegDevice::feed_dma_word(uint16_t word) {
 }
 
 void VmpegDevice::complete_dma() {
-    // vmpeg.sv:711-714: kSysCmdStartDma stays set.
+    // kSysCmdStartDma stays set.
     dma_active_ = false;
     dma_for_fma_ = false;
     fma_command_register_ &= ~kFmaCmdStartDma;

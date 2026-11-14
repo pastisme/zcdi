@@ -141,7 +141,7 @@ struct SlaveSaveState {
     uint8_t tray_state_ = slave::kTrayClosed; // slave::TrayState
 
     // SLAVE firmware 2.0 audio attenuation; comments give each field's RAM location.
-    // 0.5 MHz counter (CDi_MiSTer uc_68hc05.sv); its high byte $1a ticks every 512 us.
+    // 0.5 MHz counter; its high byte $1a ticks every 512 us.
     static constexpr int kTimerTickCycles = int(int64_t(kCpuClockHz) * 256 / 500000);
     int timer_cycle_accum_ = 0;
     uint8_t timer_high_ = 0; // $1a

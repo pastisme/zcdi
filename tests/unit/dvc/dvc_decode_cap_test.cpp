@@ -44,7 +44,7 @@ std::vector<Shown> run(bool es, int present_every, size_t* max_depth) {
 
 TEST_SUITE("dvc") {
 
-TEST_CASE("decoding pauses with the RTL output FIFO full and one picture waiting") {
+TEST_CASE("decoding pauses with the output FIFO full and one picture waiting") {
     for (bool es : {true, false}) {
         CAPTURE(es);
         DvcVideo v;

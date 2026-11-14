@@ -1,27 +1,18 @@
-// CDi_MiSTer mpeg_video.sv.
+// The frame player: picture timing, DTS sync and stepping.
 #include "doctest.h"
 
 #include <cstdint>
 #include <vector>
 
 #include "vmpeg/vmpeg.h"
-#include "support/private_access.h"
+#include "support/vmpeg_private.h"
 #include "support/vmpeg_regs.h"
 
 using zcdi::mamecdi::VmpegDevice;
-using zcdi::mamecdi::VmpegSaveState;
 using zcdi_test::kFmvGenDecCmdOffset;
 using zcdi_test::kFmvSyscmdOffset;
 using zcdi_test::kFmvSysScrOffset;
 using zcdi_test::write16;
-
-ZCDI_PRIVATE_MEMBER(PlayerPlaybackActive, VmpegSaveState, fmv_playback_active_, bool);
-ZCDI_PRIVATE_MEMBER(PlayerFmvDclk, VmpegSaveState, fmv_dclk_, uint32_t);
-ZCDI_PRIVATE_MEMBER(PlayerDtsFifo, VmpegSaveState, fmv_dts_fifo_, std::vector<int64_t>);
-ZCDI_PRIVATE_MEMBER(PlayerDemux, VmpegSaveState, fmv_demux_, zcdi::mamecdi::PsDemux);
-ZCDI_PRIVATE_MEMBER(PlayerScrValid, VmpegSaveState, fmv_demux_scr_valid_, bool);
-ZCDI_PRIVATE_MEMBER(PlayerDesyncQ, VmpegSaveState, player_desync_q_, int);
-ZCDI_PRIVATE_MEMBER(PlayerStartSatisfied, VmpegSaveState, fmv_dts_start_satisfied_, bool);
 
 namespace {
 constexpr uint32_t kPalFieldClocks = 600000;       // 30 MHz / 50 Hz
@@ -29,7 +20,7 @@ constexpr int kRate25 = 3;
 constexpr int kRate2997 = 4;
 
 void start_playback(VmpegDevice& v, int rate_code) {
-    zcdi_test::priv<PlayerPlaybackActive>(v) = true;
+    zcdi_test::set_playback_active(v, true);
     v.set_video_frame_decoded(rate_code);
 }
 
@@ -48,7 +39,7 @@ std::vector<int> shown_desyncs(VmpegDevice& v, size_t count) {
     std::vector<int> out;
     for (int f = 0; f < 100 && out.size() < count; ++f) {
         if (!v.frame_player_field(kPalFieldClocks, 8).show) continue;
-        out.push_back(zcdi_test::priv<PlayerDesyncQ>(v));
+        out.push_back(v.state().player_desync_q_);
         v.note_picture_displayed();
     }
     return out;
@@ -84,7 +75,7 @@ TEST_CASE("nothing is shown while playback is stopped or no picture waits") {
     v.set_video_frame_decoded(kRate25);
     CHECK(shown_fields(v, 10).empty());  // playback not active
 
-    zcdi_test::priv<PlayerPlaybackActive>(v) = true;
+    zcdi_test::set_playback_active(v, true);
     CHECK(shown_fields(v, 10, /*ready=*/0).empty());
 }
 
@@ -97,9 +88,9 @@ TEST_CASE("synchronous mode shortens the period while the clock leads the DTS") 
     VmpegDevice v;
     write16(v, kFmvSysScrOffset, 0x0004);  // synchronous
     const uint32_t dclk = 0x100000;
-    zcdi_test::priv<PlayerFmvDclk>(v) = dclk;
+    zcdi_test::set_fmv_dclk(v, dclk);
     // Every queued picture's DTS is 20 units (64 dclk ticks each) behind.
-    zcdi_test::priv<PlayerDtsFifo>(v).assign(300, dts_at_desync(dclk, 20));
+    zcdi_test::dts_fifo(v).assign(300, dts_at_desync(dclk, 20));
     start_playback(v, kRate25);
     // Each period is up to 20 * 2048 clocks shorter, so more than 150.
     const size_t shown = shown_fields(v, 300).size();
@@ -111,7 +102,7 @@ TEST_CASE("Step shows one picture while playback is stopped") {
     VmpegDevice v;
     v.set_video_frame_decoded(kRate25);
     write16(v, kFmvSyscmdOffset, 0x0040);  // Step
-    // Armed at the first vsync, shown at the second (mpeg_video.sv:962-965).
+    // Armed at the first vsync, shown at the second.
     CHECK(shown_fields(v, 10) == std::vector<int>{2});
 
     SUBCASE("GEN_DEC_CMD 0x22xx steps too, but not while paused") {
@@ -134,9 +125,8 @@ TEST_CASE("far behind the SCR pictures come at the shortest period and none is d
     VmpegDevice v;
     start_playback(v, kRate25);
     const int64_t scr = 1000000;
-    zcdi_test::priv<PlayerDemux>(v).scr = scr;
-    zcdi_test::priv<PlayerScrValid>(v) = true;
-    zcdi_test::priv<PlayerDtsFifo>(v).assign(300, scr - 20000);
+    zcdi_test::set_demux_scr(v, scr);
+    zcdi_test::dts_fifo(v).assign(300, scr - 20000);
     // 7/8 of 1200000 clocks: 300 fields of 600000 hold 171 periods of 1050001.
     CHECK(shown_fields(v, 300).size() == 171u);
 }
@@ -147,10 +137,10 @@ TEST_CASE("the period stays within 1/8 of the picture period") {
         VmpegDevice v;
         write16(v, kFmvSysScrOffset, 0x0004);
         const uint32_t dclk = 0x100000;
-        zcdi_test::priv<PlayerFmvDclk>(v) = dclk;
-        zcdi_test::priv<PlayerDtsFifo>(v).assign(300, dts_at_desync(dclk, desync));
+        zcdi_test::set_fmv_dclk(v, dclk);
+        zcdi_test::dts_fifo(v).assign(300, dts_at_desync(dclk, desync));
         start_playback(v, kRate25);
-        zcdi_test::priv<PlayerStartSatisfied>(v) = true;  // past the start wait, whatever the DTS
+        zcdi_test::set_dts_start_satisfied(v);  // past the start wait, whatever the DTS
         // 200 units * 2048 clocks is far more than 1/8 of 1200000. The first
         // picture comes after a full period, before any desync is measured.
         const size_t shown = shown_fields(v, 300).size();
@@ -163,9 +153,9 @@ TEST_CASE("a measured desync holds for 3 pictures without a timestamp") {
     VmpegDevice v;
     write16(v, kFmvSysScrOffset, 0x0004);
     const uint32_t dclk = 0x100000;
-    zcdi_test::priv<PlayerFmvDclk>(v) = dclk;
+    zcdi_test::set_fmv_dclk(v, dclk);
     // No Decoder On: no 90 kHz period, so no predicted DTS.
-    zcdi_test::priv<PlayerDtsFifo>(v) = {dts_at_desync(dclk, 20), 0, 0, 0, 0, 0};
+    zcdi_test::dts_fifo(v) = {dts_at_desync(dclk, 20), 0, 0, 0, 0, 0};
     start_playback(v, kRate25);
     std::vector<int> desyncs = shown_desyncs(v, 5);
     REQUIRE(desyncs.size() == 5u);
@@ -180,9 +170,9 @@ TEST_CASE("a picture without a timestamp syncs to the last DTS plus a picture pe
         write16(v, kFmvSyscmdOffset, 0x1000);  // Decoder On: the 90 kHz period counts
         write16(v, kFmvSysScrOffset, 0x0004);
         const uint32_t dclk = 0x100000;
-        zcdi_test::priv<PlayerFmvDclk>(v) = dclk;
+        zcdi_test::set_fmv_dclk(v, dclk);
         const int64_t first = dts_at_desync(dclk, 20);
-        zcdi_test::priv<PlayerDtsFifo>(v) = {first, second_has_dts ? first + 3600 : 0, 0};
+        zcdi_test::dts_fifo(v) = {first, second_has_dts ? first + 3600 : 0, 0};
         start_playback(v, kRate25);
         return shown_desyncs(v, 2);
     };
@@ -196,8 +186,8 @@ TEST_CASE("slow motion doesn't sync to the DTS") {
     write16(v, kFmvSysScrOffset, 0x0004);
     write16(v, kFmvSyscmdOffset, 0x0008 | 1);  // Play at half speed
     const uint32_t dclk = 0x100000;
-    zcdi_test::priv<PlayerFmvDclk>(v) = dclk;
-    zcdi_test::priv<PlayerDtsFifo>(v).assign(300, dts_at_desync(dclk, 20));
+    zcdi_test::set_fmv_dclk(v, dclk);
+    zcdi_test::dts_fifo(v).assign(300, dts_at_desync(dclk, 20));
     start_playback(v, kRate25);
     CHECK(shown_fields(v, 40).size() == 10u);  // every 4th PAL field, no shortening
 }

@@ -1,5 +1,4 @@
-// When the MCD212 does its line work: CDi_MiSTer video_timing.sv, mcd212.sv
-// and the hardware captures in its doc/mcd212.md.
+// When the MCD212 does its line work.
 #include "doctest.h"
 
 #include <cstddef>
@@ -7,17 +6,15 @@
 
 #include "mcd212/mcd212.h"
 #include "support/mcd212_field.h"
-#include "support/private_access.h"
+#include "support/mcd212_regs.h"
 
 using zcdi::mamecdi::Mcd212;
-using zcdi::mamecdi::Mcd212SaveState;
-using zcdi_test::priv;
+using zcdi_test::write_mmio16;
+using namespace zcdi::mamecdi::mcd212;
 
-ZCDI_PRIVATE_MEMBER(TimingDcr, Mcd212SaveState, dcr_, uint16_t[2]);
 
 namespace {
 
-constexpr uint32_t kCsr2R = 0x01, kCsr1R = 0x11;
 constexpr int kPalLines = 312, kFirstActive = 26, kActive = 280;  // PAL, 280 lines
 
 void put32(uint8_t* p, uint32_t v) {
@@ -53,7 +50,7 @@ TEST_CASE("the ICA interrupts as blanking starts, the first DCA after the first 
     put32(a + 0x1000, 0x60000000u);  // DCA, first line: INTERRUPT
     put32(a + 0x1004, 0x00000000u);  // STOP
     Mcd212 mcd;
-    priv<TimingDcr>(mcd)[0] = 0x0200;  // IC; DC once the ICA has set DCP
+    write_mmio16(mcd, kDcr1, kDcrIc);  // IC; DC once the ICA has set DCP
     auto ack = [&] { return (mcd.read_byte(kCsr2R) & 0x04) != 0; };  // IT1, read clears
 
     mcd.begin_field(kPalLines);
@@ -64,7 +61,7 @@ TEST_CASE("the ICA interrupts as blanking starts, the first DCA after the first 
     for (int line = kFirstActive + kActive; line < kPalLines; ++line) mcd.end_of_line(line, a, planes[1], sizeof(planes[0]));
     mcd.end_field();
 
-    priv<TimingDcr>(mcd)[0] = 0x0300;  // IC | DC
+    write_mmio16(mcd, kDcr1, kDcrIc | kDcrDc);  // IC | DC
     mcd.begin_field(kPalLines);
     for (int line = 0; line < kFirstActive; ++line) mcd.end_of_line(line, a, planes[1], sizeof(planes[0]));
     CHECK_FALSE(ack());

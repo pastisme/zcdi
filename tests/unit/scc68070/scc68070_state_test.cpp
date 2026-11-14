@@ -7,15 +7,9 @@
 #include "support/state_roundtrip.h"
 
 using zcdi::mamecdi::Scc68070Periph;
+using namespace zcdi::mamecdi::scc68070;
 
 namespace {
-
-constexpr uint32_t kTimerTsrTcr = 0x80002020;
-constexpr uint32_t kTimerReload = 0x80002022;
-constexpr uint32_t kTimer0 = 0x80002024;
-constexpr uint32_t kTimer1 = 0x80002026;
-constexpr uint32_t kTimer2 = 0x80002028;
-constexpr uint32_t kPicr1 = 0x80002045;
 
 uint16_t timer0(Scc68070Periph& s) { return uint16_t(s.read_byte(kTimer0) << 8 | s.read_byte(kTimer0 + 1)); }
 
@@ -45,7 +39,7 @@ TEST_CASE("a restored SCC68070 timer counts and interrupts like the original") {
     }
 }
 
-// scc68070.sv: the timer requests its interrupt while TSR OV0 is set; only a
+// The timer requests its interrupt while TSR OV0 is set; only a
 // TSR write clears it, not the interrupt acknowledge.
 TEST_CASE("the timer interrupt holds until TSR is cleared") {
     Scc68070Periph s;

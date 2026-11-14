@@ -62,7 +62,7 @@ int pixel_repeat(uint16_t ddr) { return 2 << ((ddr >> kDdrMtShift) & 0x3); }
 // index, so the byte offset is the masked value with bit 0 cleared.
 uint32_t reload_vsr_jump_target(uint32_t cmd) { return (cmd & 0x0007ffffu) & ~1u; }
 
-// RELOAD DISPLAY PARAMETERS (same_cdi set_display_parameters): bits 0-3 to
+// RELOAD DISPLAY PARAMETERS: bits 0-3 to
 // DDR bits 8-11 (file type), bit 4 to DCR bit 11.
 void apply_display_parameters(uint16_t& ddr_reg, uint16_t& dcr_reg, uint8_t value) {
     ddr_reg = uint16_t((ddr_reg & 0xf0ffu) | (uint16_t(value & 0x0fu) << 8));
@@ -168,7 +168,7 @@ void Mcd212::set_register(int path, uint8_t reg, uint32_t value) {
         return;
     }
     if (reg >= kRegRegionControl && reg < kRegBackdropColor) {
-        // Either path may write Region Control (same_cdi).
+        // Either path may write Region Control.
         region_control_[reg - kRegRegionControl] = value;
         invalidate_region_arrays();
         return;
@@ -190,7 +190,7 @@ void Mcd212::set_register(int path, uint8_t reg, uint32_t value) {
             if (path == 0) plane_order_ = uint8_t(value & 0x07);
             return;
         case kRegClutBank:
-            // Path 1 can only reach banks 2-3 (hardware, as same_cdi).
+            // Path 1 can only reach banks 2-3.
             clut_bank_[path & 1] = (path == 0) ? uint8_t(value & 0x03) : uint8_t(0x02 | (value & 0x01));
             return;
         case kRegTransparentColorA:
@@ -341,7 +341,7 @@ void Mcd212::fill_region_arrays() {
 }
 
 void Mcd212::process_ica(int path, const uint8_t* plane_ram, std::size_t plane_size) {
-    // ICA starts at byte 0x400, or 0x404 in even interlaced fields (ica_dca_ctrl.sv, mcd212.sv ica_parity).
+    // ICA starts at byte 0x400, or 0x404 in even interlaced fields.
     uint32_t byte_off = (dcr_[0] & kDcr1Sm) && even_field_ ? kIcaStartEvenField : kIcaStart;
     for (int i = 0; i < kIcaMaxCommands; ++i) {
         if (byte_off + 4 > plane_size) break;
@@ -372,7 +372,7 @@ void Mcd212::process_ica(int path, const uint8_t* plane_ram, std::size_t plane_s
             break;
         } // sets the real register
         if (op < kCmdUndefined) {
-            // Both paths' flags live in CSR2R (as MAME).
+            // Both paths' flags live in CSR2R.
             csr2r_ |= (path == 0) ? kCsr2rIt1 : kCsr2rIt2;
             if (!(csrw_[path] & kCsrWDi)) irq1_ = true;
             byte_off += 4;
@@ -393,7 +393,7 @@ void Mcd212::process_ica(int path, const uint8_t* plane_ram, std::size_t plane_s
 }
 
 void Mcd212::process_dca(int path, const uint8_t* plane_ram, std::size_t plane_size) {
-    // DCP can hold 22 bits; same_cdi masks into the installed VRAM.
+    // DCP can hold 22 bits; masked into the installed VRAM.
     uint32_t byte_off = dca_[path] & (uint32_t(plane_size) - 1);
     int consumed = 0;
     bool processing = true;
@@ -404,7 +404,7 @@ void Mcd212::process_dca(int path, const uint8_t* plane_ram, std::size_t plane_s
         uint8_t op = uint8_t(cmd >> 24);
         uint32_t arg = cmd & 0x00ffffffu;
         byte_off += 4;
-        consumed += 4; // STOP counts too (same_cdi)
+        consumed += 4; // STOP counts too
 
         if (op < kCmdNop) {
             processing = false;
@@ -414,12 +414,12 @@ void Mcd212::process_dca(int path, const uint8_t* plane_ram, std::size_t plane_s
         if (op < kCmdReloadDcpStop) continue; // meaningless mid-DCA, ignored
         if (op < kCmdReloadVsr) {
             // Jumps DCA at once, skipping the budget advance; narrower mask
-            // than DCP's (same_cdi `m_dca = cmd & 0x7fffc; return;`).
+            // than DCP's.
             split_address(ddr_[path], dcp_[path], arg & 0x3ffffcu);
             dca_[path] = arg & 0x0007fffcu;
             return;
         }
-        // In DCA both RELOAD VSR forms set VSR (same_cdi process_dca).
+        // In DCA both RELOAD VSR forms set VSR.
         if (op < kCmdReloadVsrStop) {
             set_vsr_address(path, arg);
             continue;
@@ -445,14 +445,14 @@ void Mcd212::process_dca(int path, const uint8_t* plane_ram, std::size_t plane_s
         // kCmdUndefined: no-op
     }
 
-    // The whole 64-byte budget is consumed wherever STOP fell (same_cdi).
+    // The whole 64-byte budget is consumed wherever STOP fell.
     byte_off += (kDcaBudgetBytes - consumed);
     dca_[path] = byte_off;
 }
 
 namespace {
 
-// same_cdi's m_dyuv_*_to_* tables: each term truncated on its own.
+// Each term truncated on its own.
 struct DyuvTerms {
     int16_t v_to_r[256], u_to_g[256], v_to_g[256], u_to_b[256];
 };
@@ -518,7 +518,7 @@ void Mcd212::decode_dyuv_line(const uint8_t* src, uint32_t* row, uint32_t dyuv_a
     }
 }
 
-// Entry (byte & mask) | bank (same_cdi BYTE_TO_CLUT<Channel>).
+// Entry (byte & mask) | bank.
 Mcd212::ClutIndex Mcd212::clut_index(int path, uint8_t icm) const {
     // CM1=1 is RGB555 (Green Book V.4.6.1), handled before this.
     if (icm == kIcmClut8) return path == 0 ? ClutIndex{.valid = true, .mask = 0xff, .bank = 0x00} : ClutIndex{};
@@ -561,13 +561,13 @@ Mcd212::TransparencyRule Mcd212::transparency_rule(int path) const {
     }
     rule.invert = (field & kTcrInvert) != 0;
     // Color Key is for CLUT planes only, bits 2-7, Mask Color bits don't-care
-    // (Green Book V.5.7.2.2; mcd212.sv gates it on !plane_dyuv_active).
+    // (Green Book V.5.7.2.2).
     const bool clut_coded =
         icm_[path] == kIcmClut8 || icm_[path] == kIcmClut7 || icm_[path] == kIcmClut77 || icm_[path] == kIcmClut4;
     rule.color_key = rule.color_key && clut_coded;
     rule.key = transparent_color_[path];
     rule.compared_bits = ~mask_color_[path] & kColorBits;
-    // Inverted Color Key on DYUV is undefined; mcd212.sv's "Jeopardy hack" keeps the plane visible.
+    // Inverted Color Key on DYUV is undefined; keeping the plane visible fixes Jeopardy.
     if ((field & kTcrField) == kTcrNotKey && icm_[path] == kIcmDyuv) rule.invert = false;
     return rule;
 }
@@ -618,7 +618,7 @@ void Mcd212::apply_pixel_hold(int path, uint32_t* row, bool* opaque, int width) 
 }
 
 void Mcd212::render_line_rle(int path, uint32_t* row, bool* present, const uint8_t* plane_ram, std::size_t plane_mask) {
-    // RL7 (same_cdi process_vsr DDR_FT_RLE): bit 7 set = run, next byte its
+    // RL7: bit 7 set = run, next byte its
     // length (0 = to end of line); clear = one pixel.
     const ClutIndex index = clut_index(path, icm_[path]);
     uint32_t vsr = vsr_address(path);
@@ -727,7 +727,7 @@ void Mcd212::decode_plane_line(int path, const uint8_t* plane_ram, std::size_t p
     set_vsr_address(path, byte_off + active_width_ / repeat_factor);
 }
 
-// same_cdi mix_lines. The weights are this column's, from Region Control.
+// The weights are this column's, from Region Control.
 uint32_t Mcd212::composite_pixel(uint32_t color_a, bool opaque_a, uint32_t color_b, bool opaque_b, uint8_t weight_a,
                                  uint8_t weight_b) const {
     // ICF * (C' - 16), ICF = ICF'/63, rounded and signed: only the final sum
@@ -755,7 +755,7 @@ uint32_t Mcd212::composite_pixel(uint32_t color_a, bool opaque_a, uint32_t color
     }
 
     // Mix disabled: front plane, else back plane, each with its own weight,
-    // else backdrop. Mixing with neither plane present shows the backdrop too (mcd212.sv).
+    // else backdrop. Mixing with neither plane present shows the backdrop too.
     bool b_in_front = (plane_order_ & kPorBa) != 0;
     uint32_t front_color = b_in_front ? color_b : color_a;
     bool front_opaque = b_in_front ? opaque_b : opaque_a;
@@ -829,8 +829,7 @@ void Mcd212::composite_row(const uint32_t* row_a, const uint32_t* row_b, int wid
     // Reuse the last result when a pixel's inputs match its neighbour's.
     const uint8_t* weight_a = weight_factor_line_[0];
     const uint8_t* weight_b = weight_factor_line_[1];
-    // The frame player shows on every vsd pixel, black outside its window
-    // (cditop.sv, frameplayer.sv); studio black, not the RTL's 0.
+    // The frame player shows on every vsd pixel, studio black outside its window.
     const bool fmv_backdrop = dvc_attached_ && icm_ev_;
     uint32_t color = 0;
     for (int i = 0; i < width; ++i) {
@@ -854,7 +853,7 @@ void Mcd212::composite_row(const uint32_t* row_a, const uint32_t* row_b, int wid
 void Mcd212::decode_plane_row(int path, const uint8_t* plane_ram, std::size_t plane_size, uint32_t* row, int step) {
     bool opaque[kFbWidth];
     // Transparency per Double Resolution column after Pixel Hold, as
-    // mcd212.sv: RC_X can split a Normal Resolution pixel.
+    // RC_X can split a Normal Resolution pixel.
     int width = kFbWidth;
     if (icm_[path] == kIcmClut4) {
         decode_double_res_line(path, plane_ram, plane_size, row, opaque);
@@ -881,7 +880,7 @@ void Mcd212::decode_plane_row(int path, const uint8_t* plane_ram, std::size_t pl
 }
 
 // CLUT4/RL3 (Green Book Figure V.34): two pixels per byte, high nibble first;
-// Double Resolution regardless of DCR's CM bit (mcd212.sv, clut_rle.sv).
+// Double Resolution regardless of DCR's CM bit.
 void Mcd212::decode_double_res_line(int path, const uint8_t* plane_ram, std::size_t plane_size, uint32_t* row,
                                     bool* present) {
     const uint16_t ddr = ddr_[path];
@@ -938,7 +937,7 @@ void Mcd212::decode_double_res_line(int path, const uint8_t* plane_ram, std::siz
     set_vsr_address(path, vsr);
 }
 
-// One frame of mcd212.sv's blink timing; CON or COF 0 disables blinking.
+// One frame of blink timing; CON or COF 0 disables blinking.
 void Mcd212::update_cursor_blink() {
     int cof = int((cursor_control_ & kCurcntCofMask) >> kCurcntCofShift);
     int con = int((cursor_control_ & kCurcntConMask) >> kCurcntConShift);
@@ -999,7 +998,7 @@ void Mcd212::overlay_dvc_frame() {
     // Placement and the frame are in Normal Resolution pixels.
     const int height = std::min({int(dvc_decwin_h_), kFbHeight - dvc_scrpos_y_, dvc_frame_height_ - dvc_decoff_y_});
     const int width = std::min(int(dvc_decwin_w_), dvc_frame_width_ - dvc_decoff_x_);
-    // VCD clock: a decoded pixel per 512/231 columns, else two (vmpeg.sv).
+    // VCD clock: a decoded pixel per 512/231 columns, else two.
     const bool vcd = dvc_vcd_pixel_clock_;
     const int columns = vcd ? std::min((width * 512 + 230) / 231, 2 * (kLineWidth - dvc_scrpos_x_))
                             : 2 * std::min(width, kLineWidth - dvc_scrpos_x_);
@@ -1041,17 +1040,17 @@ void Mcd212::overlay_dvc_frame() {
 }
 
 int Mcd212::begin_field(int lines) {
-    // video_timing.sv: the even field ends a line later (the half line).
+    // The even field ends a line later (the half line).
     field_lines_ = even_field_ ? lines + 1 : lines;
     weaving_ = even_field_ || (dcr_[0] & kDcr1Sm);
     vertical_blank_started_ = false;
     const bool fd = (dcr_[0] & kDcr1Fd) != 0, st = (csrw_[0] & kCsr1wSt) != 0;
-    // Datasheet tables 5-4/5-6, video_timing.sv: 240 lines with FD or ST, else 280;
+    // Datasheet tables 5-4/5-6: 240 lines with FD or ST, else 280;
     // 384 pixels with CF and not ST, else 360.
     active_height_ = (fd || st) ? 240 : kFbHeight;
     active_width_ = ((dcr_[0] & kDcr1Cf) && !st) ? kLineWidth : 360;
     display_aspect_ = tv_display_aspect(active_width_, active_height_, dcr_[0] & kDcr1Cf, fd);
-    // video_timing.sv v_start: 18 at 60 Hz, else 46 (240 lines) or 26 (280).
+    // First active line: 18 at 60 Hz, else 46 (240 lines) or 26 (280).
     first_active_line_ = fd ? 18 : (st ? 46 : 26);
     // A 50 Hz picture doesn't fit a 262-line field.
     active_height_ = std::max(0, std::min(active_height_, field_lines_ - 1 - first_active_line_));
@@ -1064,11 +1063,11 @@ void Mcd212::end_of_line(int line, const uint8_t* plane_a, const uint8_t* plane_
     if (y >= 0 && y < active_height_) {
         render_line(y, plane_a, plane_b, plane_size);
         output_row(y);
-        // mcd212.sv: vsd = backdrop_pixel && ev; EV can change per line.
+        // vsd = backdrop pixel and EV; EV can change per line.
         if (!icm_ev_) {
             std::fill_n(backdrop_mask_.begin() + static_cast<std::ptrdiff_t>(y) * kFbWidth, kFbWidth, uint8_t{0});
         }
-        // DCA in the horizontal blanking after its line (mcd212.sv dca_read).
+        // DCA in the horizontal blanking after its line.
         if (dcr_[0] & kDcrDc) process_dca(0, plane_a, plane_size);
         if (dcr_[1] & kDcrDc) process_dca(1, plane_b, plane_size);
     }
@@ -1078,13 +1077,13 @@ void Mcd212::end_of_line(int line, const uint8_t* plane_a, const uint8_t* plane_
     }
 }
 
-// DA falls and the ICA runs as pixel output stops (mcd212.sv new_frame).
+// DA falls and the ICA runs as pixel output stops.
 void Mcd212::start_vertical_blank(const uint8_t* plane_a, const uint8_t* plane_b, std::size_t plane_size) {
     vertical_blank_started_ = true;
     csr1r_ &= ~kCsr1rDa;
     if (dcr_[0] & kDcrIc) process_ica(0, plane_a, plane_size);
     if (dcr_[1] & kDcrIc) process_ica(1, plane_b, plane_size);
-    // same_cdi ica_tick: `m_dca = get_dcp()`.
+    // After the ICA, DCA restarts from DCP.
     dca_[0] = join_address(ddr_[0], dcp_[0]);
     dca_[1] = join_address(ddr_[1], dcp_[1]);
 }
@@ -1098,12 +1097,12 @@ void Mcd212::end_field() {
         output_row(y);
     update_cursor_blink();
     // Active rows went out line by line; these output the rows they change.
-    // The cursor stays on top of FMV (mcd212.sv clears vsd under it).
+    // The cursor stays on top of FMV.
     overlay_dvc_frame();
     draw_cursor();
     woven_last_ = weaving_;
-    // video_timing.sv: an odd field is followed by an even one only with SM;
-    // PA (fake_parity) toggles, and is 1 after every even field.
+    // An odd field is followed by an even one only with SM;
+    // PA toggles, and is 1 after every even field.
     if (even_field_) {
         even_field_ = false;
         csr1r_ |= kCsr1rPa;

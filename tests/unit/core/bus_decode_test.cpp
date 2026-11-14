@@ -16,9 +16,9 @@ using zcdi_test::lo16;
 
 TEST_SUITE("core") {
 
-// rtl/cditop.sv bus_err_ram_area1-4, overlay off, with a DVC cartridge. Only
-// points where zcdi and the RTL agree (0x500000-0x57ffff and some holes differ).
-TEST_CASE("bus-error ranges match the RTL at their edges") {
+// Overlay off, with a DVC cartridge. Not checked: 0x500000-0x57ffff and some
+// holes, which zcdi keeps decoded.
+TEST_CASE("bus-error ranges at their edges") {
     struct Probe {
         uint32_t addr;
         bool decoded;
@@ -63,7 +63,6 @@ TEST_CASE("the DVC cartridge RAM exists only with a cartridge") {
     CHECK(bus.read8(0xd10000) == 0x5a);
 }
 
-// CDi_MiSTer bus_err_ram_area5: `range && !mpeg_ram_enabled`.
 TEST_CASE("the DVC decode-RAM gap opens after 64 VMPEG register writes") {
     // Local duplicates of bus.cpp's anonymous-namespace constants.
     constexpr uint32_t kDvcRegBase = 0xe00000;
@@ -114,7 +113,7 @@ TEST_CASE("a 32-bit access straddling into an undecoded range faults on its seco
     }
 }
 
-// Only A0-A23 leave the chip (rtl/scc68070.sv); A31:30 = 10 in supervisor
+// Only A0-A23 leave the chip; A31:30 = 10 in supervisor
 // mode selects the on-chip peripherals.
 TEST_CASE("the external bus ignores the top address byte") {
     SUBCASE("a tagged pointer reaches RAM") {

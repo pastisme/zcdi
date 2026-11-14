@@ -35,9 +35,9 @@ inline void write_mode2_header(int lba, zcdi::RawSector& out) {
 }
 
 // Real-time file submodes.
-constexpr uint8_t kSubmodeData = 0x48;          // real-time | data
-constexpr uint8_t kSubmodeAudio = 0x64;         // real-time | form 2 | audio
-constexpr uint8_t kSubmodeAudioTrigger = 0x74;  // ... | trigger
+constexpr uint8_t kSubmodeData = zcdi::kSubmodeRt | zcdi::kSubmodeData;
+constexpr uint8_t kSubmodeAudio = zcdi::kSubmodeRt | zcdi::kSubmodeForm | zcdi::kSubmodeAudio;
+constexpr uint8_t kSubmodeAudioTrigger = kSubmodeAudio | zcdi::kSubmodeTrig;
 
 // Valid Mode 2 sectors at their own MSF; payload byte 0 is marker(lba).
 class FakeDisc : public zcdi::Disc {

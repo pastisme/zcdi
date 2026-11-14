@@ -14,7 +14,7 @@ void Disc::finish_sector(int lba, RawSector& out) {
     if (!byteswap_latched_ && sector_looks_byteswapped(out.data)) byteswap_latched_ = true;
     if (byteswap_latched_) byteswap_sector(out.data, kRawSectorSize);
 
-    // Descrambled only if that makes it valid, as same_cdi/MAME.
+    // Descrambled only if that makes it valid.
     if (!sector_looks_valid(out.data, lba)) {
         uint8_t descrambled[kRawSectorSize]{};
         std::memcpy(descrambled, out.data, kRawSectorSize);

@@ -79,7 +79,7 @@ std::vector<std::byte> exit_bios() {
 
 TEST_SUITE("core") {
 
-// As cditop.sv last_reset_by_slave: Auto Play stays off until an external reset.
+// Auto Play stays off until an external reset.
 TEST_CASE("a SLAVE reset request resets the machine and turns Auto Play off") {
     std::vector<std::byte> bios = exit_bios();
     std::unique_ptr<zcdi::Machine> m = std::make_unique<zcdi::Machine>(bios, zcdi::VideoStandard::kPal,

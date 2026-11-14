@@ -25,7 +25,7 @@ bool has_cdi_disc_label(Disc& disc) {
     return label[0] == 1 && std::memcmp(label + 1, "CD-I ", 5) == 0;
 }
 
-// MAME cdimono1_mem; sizes match MAME's region declarations.
+// Mono-I address map.
 constexpr uint32_t kPlane0Base = 0x000000, kPlane0Size = 0x080000;
 constexpr uint32_t kPlane1Base = 0x200000, kPlane1Size = 0x080000;
 constexpr uint32_t kNvramBase = 0x320000, kNvramSize = 0x004000;
@@ -35,21 +35,21 @@ constexpr uint32_t kCdicRegBase = 0x303c00, kCdicRegSize = 0x000400;
 constexpr uint32_t kSlaveBase = 0x310000, kSlaveSize = 0x008000;
 constexpr uint32_t kMcd212Base = 0x4fffe0, kMcd212Size = 0x000020;
 constexpr uint32_t kExtraBase = 0x500000, kExtraSize = 0x080000;
-// MAME .noprw(): the video driver writes 0x318000 at every boot.
+// Ignored: the video driver writes 0x318000 at every boot.
 constexpr uint32_t kSlaveNvramGapBase = 0x318000, kSlaveNvramGapSize = 0x008000;
 // Faults without a cartridge, so the OS-9 RAM probe never pools it.
 constexpr uint32_t kDvcCartRamBase = 0xd00000, kDvcCartRamSize = 0x100000;
 constexpr uint32_t kDvcCartRomBase = 0xe40000, kDvcCartRomSize = 0x040000;
 constexpr uint32_t kDvcDecodeRamBase = 0xe80000, kDvcDecodeRamSize = 0x080000;
 constexpr uint32_t kDvcRegBase = 0xe00000, kDvcRegSize = 0x040000;
-// cditop.sv rom_playcdi_cs
+// The Auto Play overlay ROM.
 constexpr uint32_t kPlayCdiOverlayBase = 0xf00000;
 
 constexpr int kSdramAccessWaitCycles = 2;
 
 constexpr bool in_range(uint32_t a, uint32_t base, uint32_t size) { return a >= base && a < base + size; }
 
-// `a` is in the NVRAM window; only the even byte lane decodes (MAME umask16(0xff00)).
+// `a` is in the NVRAM window; only the even byte lane decodes.
 static_assert(kNvramSize / 2 == mamecdi::Mk48t08::kSize);
 bool decode_nvram_bus_addr(uint32_t a, uint32_t& tk_off) {
     const uint32_t off = a - kNvramBase;
@@ -143,7 +143,6 @@ void Bus::dvc_tick_frame(double refresh_rate_hz) {
     }
     // No picture of its own, so checked every field.
     if (dvc_video_.consume_sequence_end()) vmpeg_.set_video_sequence_end();
-    // RTL event_last_picture_starts_display.
     if (dvc_video_.consume_last_picture_shown()) vmpeg_.set_video_last_picture();
 }
 
@@ -233,7 +232,7 @@ void Bus::set_disc(Disc* disc) {
     disc_mounted_ = disc != nullptr;
     auto tracks = disc ? disc->toc_tracks() : std::vector<TocTrack>{};
     const bool track1_audio = !tracks.empty() && tracks.front().is_audio;
-    // cditop.sv audio_cd_in_tray (a user switch there): CD-i Ready discs have a label.
+    // Audio CD in the tray: CD-i Ready discs start with an audio track but have a CD-i label.
     audio_cd_in_tray_ = track1_audio && !has_cdi_disc_label(*disc);
     slave_.set_disc_present(disc != nullptr, track1_audio);
 }
@@ -251,7 +250,7 @@ void Bus::periph_tick(int cpu_cycles) {
         if (byte >= 0) slave_.sci_receive(uint8_t(byte), slave_.sci_at_9600_baud());
     }
     if (back_device_) {
-        // 7 data bits, as scc68070.sv bypass_uart_rx.
+        // 7 data bits.
         const int byte = back_device_->tick(cpu_cycles, slave_.back_rts_negated());
         if (byte >= 0) scc_.uart_receive(uint8_t(byte & 0x7f));
     }
@@ -326,11 +325,11 @@ AudioStreams Bus::drain_audio() {
         if (!vmpeg_.audio_dsp_enabled()) vmpeg_.set_audio_decoding_started();
         vmpeg_.set_audio_frame_decoded(dvc_audio_.last_frame_header());
     }
-    // FMA underflow (vmpeg.sv:737-745), once a DMA has fed the FMA.
+    // FMA underflow, once a DMA has fed the FMA.
     if (dvc_cart_present() && fma_dma_seen_) vmpeg_.audio_field(int32_t(dvc_pcm.size() / 2), field_samples_);
     AudioStreams out;
     out.cdic = std::move(cdic_pcm);
-    // dual_ad7528.sv matrix, Q0.8 (256 = unity). The gains power up at 0 and
+    // Cartridge DAC gain matrix, Q0.8 (256 = unity). The gains power up at 0 and
     // apply as each is written: muted until the driver programs them.
     const int l2l = vmpeg_.mpeg_volume_l2l(), r2r = vmpeg_.mpeg_volume_r2r();
     const int l2r = vmpeg_.mpeg_volume_l2r(), r2l = vmpeg_.mpeg_volume_r2l();
@@ -347,7 +346,7 @@ int Bus::update_interrupts() {
     scc_.set_int1(mcd212_.irq1_asserted());
     scc_.set_in2(slave_.irq2_asserted());
 
-    // cditop.sv SR latch: first requester owns in4 until its request drops.
+    // SR latch: the first requester owns in4 until its request drops.
     bool cdic_req = cdic_.irq4_asserted();
     bool vmpeg_req = vmpeg_.irq_asserted();
     switch (in4_owner_) {
@@ -358,7 +357,7 @@ int Bus::update_interrupts() {
             if (!vmpeg_req) in4_owner_ = In4Owner::kIdle;
             break;
         case In4Owner::kIdle:
-            // VMPEG wins a tie: cditop.sv assigns it last.
+            // VMPEG wins a tie.
             if (cdic_req) in4_owner_ = In4Owner::kCdic;
             if (vmpeg_req) in4_owner_ = In4Owner::kVmpeg;
             break;
@@ -384,8 +383,8 @@ int Bus::interrupt_ack(int level) {
 }
 
 void Bus::perform_cdic_dma() {
-    // same_cdi cdicdic_device::regs_w (0x3ff8); address and count from
-    // SCC68070 DMA channel 0.
+    // Started by a DMA control write; address and count from SCC68070 DMA
+    // channel 0.
     uint32_t cdic_word_index = (cdic_.dma_control() & 0x3fffu) >> 1;
     uint32_t mem_addr = scc_.dma_memory_address_counter();
     uint32_t words = scc_.dma_transfer_counter();
@@ -420,7 +419,7 @@ void Bus::perform_vmpeg_dma() {
         }
         if (words > 0 && for_fma) fma_dma_seen_ = true;
     }
-    // cditop.sv wires VMPEG only as a DMA sink; the counters still advance.
+    // VMPEG is wired only as a DMA sink; the counters still advance.
     scc_.advance_dma_ch1_memory_address_counter(words * 2);
     scc_.complete_dma_ch1_burst(words);
     vmpeg_.complete_dma();
@@ -522,8 +521,8 @@ void Bus::write8(uint32_t a, uint8_t v) {
     }
     if (in_range(a, kCdicRegBase, kCdicRegSize)) {
         cdic_.write_reg_byte(a - kCdicRegBase, v);
-        // The DMA control low byte (0x303ff9) completes the word write.
-        if (a - kCdicRegBase == 0x3f9) perform_cdic_dma();
+        // The low byte completes the word write.
+        if (a - kCdicRegBase == mamecdi::cdic::kRegDmaControl + 1) perform_cdic_dma();
         return;
     }
     if (in_range(a, kSlaveBase, kSlaveSize)) {
@@ -545,7 +544,7 @@ void Bus::write8(uint32_t a, uint8_t v) {
         return;
     }
     if (in_range(a, kDvcDecodeRamBase, kDvcDecodeRamSize)) {
-        // Dropped until the firmware enables it (vmpeg.sv:742-747).
+        // Dropped until the firmware enables it.
         if (vmpeg_.mpeg_ram_enabled()) dvc_decode_ram_[a - kDvcDecodeRamBase] = v;
         return;
     }
@@ -571,7 +570,7 @@ bool Bus::is_decoded(uint32_t a) const {
     if (in_range(a, kPlane0Base, kPlane0Size)) return true;
     if (in_range(a, kPlane1Base, kPlane1Size)) return true;
     if (in_range(a, kBiosBase, kBiosSize)) return true;
-    // The RTL bus-errors this too; kept decoded until a title needs that.
+    // Real hardware may bus-error here; kept decoded until a title needs that.
     if (in_range(a, kExtraBase, kExtraSize)) return true;
     if (in_range(a, kNvramBase, kNvramSize)) return true;
     if (in_range(a, kCdicRamBase, kCdicRamSize)) return true;
@@ -582,10 +581,9 @@ bool Bus::is_decoded(uint32_t a) const {
     if (a >= 0x80000000u) return true;
     if (in_range(a, kDvcCartRamBase, kDvcCartRamSize)) return dvc_cart_present();
     if (in_range(a, kDvcCartRomBase, kDvcCartRomSize)) return true;
-    // cditop.sv bus_err_ram_area5
     if (in_range(a, kDvcDecodeRamBase, kDvcDecodeRamSize)) return vmpeg_.mpeg_ram_enabled();
     if (in_range(a, kDvcRegBase, kDvcRegSize)) return true;
-    // bus_err_ram_area3/4: the whole window, not just the overlay's bytes.
+    // The whole window, not just the overlay's bytes.
     if (in_range(a, kPlayCdiOverlayBase, 0x10000) && playcdi_overlay_active()) return true;
     return false;
 }
@@ -613,7 +611,7 @@ int Bus::sdram_wait_cycles(uint32_t a) const {
 } // namespace zcdi
 
 namespace {
-// rtl/scc68070.sv: supervisor A31:30=10 is on-chip; everything else goes
+// Supervisor A31:30=10 is on-chip; everything else goes
 // out on the 24-bit bus, dropping A24-A31 (software tags pointer top bytes).
 uint32_t cpu_bus_address(const zcdi::Bus& bus, uint32_t a) {
     if ((a & 0xc0000000u) == 0x80000000u && bus.cpu_supervisor()) return a;

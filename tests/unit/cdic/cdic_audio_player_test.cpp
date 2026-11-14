@@ -14,8 +14,8 @@ using zcdi_test::write_reg16;
 
 namespace {
 
-constexpr uint32_t kBuffer0 = 0x2800;
-constexpr uint32_t kBuffer1 = 0x3200;
+constexpr uint32_t kBuffer0 = zcdi::mamecdi::cdic::kAudioMap0;
+constexpr uint32_t kBuffer1 = zcdi::mamecdi::cdic::kAudioMap1;
 constexpr uint8_t kStereoLevelB = 0x01;  // 4 ticks a buffer
 constexpr int kTickCycles = 200000;      // one 75 Hz sector tick
 
@@ -24,10 +24,10 @@ void fill_buffer(Cdic& cdic, uint32_t base, uint8_t coding) {
     for (uint32_t i = 0; i < 2324; ++i) cdic.write_ram_byte(base + 12 + i, uint8_t(0x31 + i * 7));
 }
 
-constexpr uint32_t kAchan = 0x00c;
-constexpr uint32_t kAbuf = 0x3f4;
-constexpr uint32_t kAudctl = 0x3fa;
-constexpr uint32_t kDbuf = 0x3fe;
+constexpr uint32_t kAchan = zcdi::mamecdi::cdic::kRegAudioChannel;
+constexpr uint32_t kAbuf = zcdi::mamecdi::cdic::kRegAbuf;
+constexpr uint32_t kAudctl = zcdi::mamecdi::cdic::kRegAudctl;
+constexpr uint32_t kDbuf = zcdi::mamecdi::cdic::kRegDbuf;
 
 void ticks(Cdic& cdic, int n) {
     for (int i = 0; i < n; ++i) cdic.tick_cycles(kTickCycles);

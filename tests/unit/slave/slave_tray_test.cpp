@@ -1,4 +1,4 @@
-// Tray moves and disc status as SERVO firmware 2.1 reports them; final states as CDi_MiSTer servo_hle.sv.
+// Tray moves and disc status as SERVO firmware 2.1 reports them.
 #include "doctest.h"
 
 #include <cstdint>

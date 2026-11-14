@@ -10,9 +10,12 @@ namespace {
 
 constexpr int kStackWords = 48;
 
+// The BIOS and DVC cartridge ROMs, where the ROM modules live.
+bool in_rom(uint32_t a) { return (a >= 0x400000 && a < 0x480000) || (a >= 0xe40000 && a < 0xe80000); }
+
 } // namespace
 
-// Words from SP; longs pointing into a module are likely return addresses.
+// Words from SP; longs pointing into ROM are likely return addresses.
 void StackWidget::draw(AppState& state) {
     if (!begin_machine_window(state)) return;
     const zcdi::MachineInspector view(*state.machine);
@@ -30,7 +33,7 @@ void StackWidget::draw(AppState& state) {
             ImGui::Text("%04X", static_cast<unsigned>(view.peek16(addr)));
             ImGui::TableSetColumnIndex(2);
             const uint32_t value = view.peek32(addr);
-            if (!state.symbols.where(value).empty()) address_cell(state, value, i);
+            if (in_rom(value)) address_cell(state, value, i);
         }
         ImGui::EndTable();
     }

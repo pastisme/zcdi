@@ -95,14 +95,12 @@ void DisassemblyWidget::draw(AppState& state) {
         return;
     }
 
-    // The addresses on screen; entry headers take a row each.
+    // The addresses on screen.
     auto layout = [&](uint32_t from, std::vector<uint32_t>& out) {
         out.clear();
         uint32_t a = from;
         int used = 0;
         while (used < rows) {
-            if (state.symbols.entry(a) && used > 0) ++used;
-            if (used >= rows) break;
             out.push_back(a);
             ++used;
             const zcdi::MachineInspector::DisassemblyLine line = decode(view, a);
@@ -139,19 +137,12 @@ void DisassemblyWidget::draw(AppState& state) {
 
     const ImGuiTableFlags flags =
         ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoPadOuterX | ImGuiTableFlags_NoHostExtendY;
-    if (ImGui::BeginTable("listing", 6, flags)) {
+    if (ImGui::BeginTable("listing", 4, flags)) {
         ImGui::TableSetupColumn("bp", ImGuiTableColumnFlags_WidthFixed, row_h);
         ImGui::TableSetupColumn("addr");
-        ImGui::TableSetupColumn("where");
         ImGui::TableSetupColumn("bytes");
-        ImGui::TableSetupColumn("code");
-        ImGui::TableSetupColumn("note", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("code", ImGuiTableColumnFlags_WidthStretch);
         for (const uint32_t addr : shown) {
-            if (const std::string* entry = state.symbols.entry(addr)) {
-                ImGui::TableNextRow();
-                ImGui::TableSetColumnIndex(1);
-                ImGui::TextDisabled("; %s", entry->c_str());
-            }
             const zcdi::MachineInspector::DisassemblyLine line = decode(view, addr);
             ImGui::PushID(static_cast<int>(addr));
             ImGui::TableNextRow();
@@ -189,24 +180,9 @@ void DisassemblyWidget::draw(AppState& state) {
             if (ImGui::InvisibleButton("bp", ImVec2(row_h, ImGui::GetTextLineHeight()))) toggle_breakpoint(state, addr);
 
             ImGui::TableSetColumnIndex(2);
-            ImGui::TextDisabled("%s", state.symbols.where(addr).c_str());
-            ImGui::TableSetColumnIndex(3);
             ImGui::TextDisabled("%s", line.bytes);
-            ImGui::TableSetColumnIndex(4);
+            ImGui::TableSetColumnIndex(3);
             ImGui::TextUnformatted(line.text);
-            ImGui::TableSetColumnIndex(5);
-            if (const std::string* note = state.symbols.note(addr)) {
-                // The first of the joined notes; all of them on hover.
-                const std::size_t cut = note->find(" / ");
-                ImGui::TextDisabled("; %s", note->substr(0, cut).c_str());
-                if (ImGui::IsItemHovered() && cut != std::string::npos) {
-                    std::string all = *note;
-                    for (std::size_t at = all.find(" / "); at != std::string::npos; at = all.find(" / ", at)) {
-                        all.replace(at, 3, "\n");
-                    }
-                    ImGui::SetTooltip("%s", all.c_str());
-                }
-            }
             ImGui::PopID();
         }
         ImGui::EndTable();

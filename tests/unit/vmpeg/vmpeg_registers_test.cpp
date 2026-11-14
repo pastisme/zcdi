@@ -1,4 +1,4 @@
-// CDi_MiSTer vmpeg.sv register reads and writes (64c8fed).
+// VMPEG register reads and writes.
 #include "doctest.h"
 
 #include <cstdint>
@@ -11,9 +11,9 @@ using zcdi::mamecdi::VmpegDevice;
 using namespace zcdi_test;
 
 namespace {
-constexpr uint16_t kDecoderOn = 0x1000;
-constexpr uint16_t kDecoderOff = 0x2000;
-constexpr uint16_t kPlay = 0x0008;
+constexpr uint16_t kDecoderOn = zcdi::mamecdi::vmpeg::kSysCmdDecoderOn;
+constexpr uint16_t kDecoderOff = zcdi::mamecdi::vmpeg::kSysCmdDecoderOff;
+constexpr uint16_t kPlay = zcdi::mamecdi::vmpeg::kSysCmdPlay;
 constexpr int kRate25 = 3;  // picture_rate code: 25 Hz
 }  // namespace
 

@@ -1,4 +1,4 @@
-// CDi_MiSTer vmpeg.sv fmv_reset_persistent_storage, frameplayer.sv:44.
+// Decoder Off, CSU and FMA underflow.
 #include "doctest.h"
 
 #include <cstdint>
@@ -26,7 +26,7 @@ TEST_CASE("Decoder On and Clear FIFO don't report Decoder Off") {
     CHECK_FALSE(v.consume_decoder_off());
 }
 
-// mpeg_video.sv:385/1006 and vmpeg.sv:244: with the decoder off the input
+// With the decoder off the input
 // FIFO and demuxer are held in reset, so bytes fed then are dropped.
 TEST_CASE("Decoder Off drops pending and later FMV bytes") {
     VmpegDevice v;
@@ -43,7 +43,7 @@ TEST_CASE("Decoder Off drops pending and later FMV bytes") {
     CHECK(v.drain_fmv_es_bytes().size() == 4);
 }
 
-// vmpeg.sv:719: CSU is assigned from the pending flag at every decoded frame.
+// CSU is assigned from the pending flag at every decoded frame.
 TEST_CASE("an unread stream-change interrupt clears at the next audio frame") {
     auto csu_after = [](int frames) {
         VmpegDevice v;
@@ -59,7 +59,7 @@ TEST_CASE("an unread stream-change interrupt clears at the next audio frame") {
 
 TEST_SUITE("vmpeg") {
 
-// sw/mpeg_audio/main.c: UNF follows once the decoded audio has played out,
+// UNF follows once the decoded audio has played out,
 // not a fixed time after the last decode.
 TEST_CASE("FMA underflow fires the field the decoded audio runs out") {
     constexpr int32_t kField = 882;           // 44.1 kHz at 50 Hz

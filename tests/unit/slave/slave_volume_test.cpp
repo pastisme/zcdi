@@ -1,5 +1,5 @@
 // As SLAVE firmware 2.0 programs the two AD7528 DACs: code/256 of the input,
-// scaled 9/16 (dual_ad7528.sv). 0 dB is code 255 -> 143, 6 dB code 128 -> 72.
+// scaled 9/16. 0 dB is code 255 -> 143, 6 dB code 128 -> 72.
 #include "doctest.h"
 
 #include <cstdint>

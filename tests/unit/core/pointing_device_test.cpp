@@ -1,4 +1,4 @@
-// Philips "Technical Info Pointing Devices" (1990); CDi_MiSTer rtl/pointing_device.sv.
+// Philips "Technical Info Pointing Devices" (1990).
 #include "doctest.h"
 
 #include <cstdint>

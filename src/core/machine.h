@@ -15,7 +15,7 @@ namespace zcdi {
 // Frames per second for a player of `standard`; call run_frame() at this rate.
 constexpr double refresh_rate(VideoStandard standard) { return standard == VideoStandard::kNtsc ? 60.0 : 50.0; }
 
-// Lines per field, non-interlaced (CDi_MiSTer video_timing.sv).
+// Lines per field, non-interlaced.
 constexpr int field_lines(VideoStandard standard) { return standard == VideoStandard::kNtsc ? 262 : 312; }
 
 // Not thread-safe.
@@ -58,7 +58,7 @@ public:
     void set_tray_open(bool open) { bus_.set_tray_open(open); }
     bool tray_open() const { return bus_.tray_open(); }
 
-    // Restarts the RTC at `t`, like MAME's -rtc, for reproducible runs. `t` is
+    // Restarts the RTC at `t`, for reproducible runs. `t` is
     // the wall clock with no time zone, e.g. sys_days{1995y / July / 14} + 12h.
     // Kept across cold_boot() and reset().
     void set_rtc_boot_time(std::chrono::sys_seconds t) { bus_.set_rtc_boot_time(t); }

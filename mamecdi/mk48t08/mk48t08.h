@@ -9,7 +9,7 @@
 namespace zcdi {
 namespace mamecdi {
 
-// Image format: raw 8192 bytes, no header (as MAME/CDi_MiSTer). Never
+// Image format: raw 8192 bytes, no header. Never
 // touches files; the frontend persists data() and feeds load().
 struct Mk48t08SaveState {
     static constexpr uint32_t kSize = 8192;
@@ -25,7 +25,7 @@ public:
     // The clock starts at host local time.
     Mk48t08();
 
-    // Restarts the clock at `t`, like MAME's -rtc, for reproducible runs. `t`
+    // Restarts the clock at `t`, for reproducible runs. `t`
     // is the wall clock with no time zone: it reads the same on every host.
     void set_boot_time(std::chrono::sys_seconds t);
 

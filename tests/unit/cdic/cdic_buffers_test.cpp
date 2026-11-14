@@ -70,7 +70,7 @@ TEST_CASE("a DBUF write with bit14 clear resets both toggles") {
     CHECK((d[1].dbuf & 5) == 4);  // audio, bank 0
 }
 
-// cdic.sv:453 compares only FILE's high byte.
+// The file filter compares only FILE's high byte.
 TEST_CASE("FILE's low byte doesn't affect the file match") {
     CdicRig rig({kSubmodeData, kSubmodeData});
     write_reg16(rig.cdic, 0x006, 0x01ff);
@@ -78,7 +78,7 @@ TEST_CASE("FILE's low byte doesn't affect the file match") {
     CHECK(rig.collect(2).size() == 2);
 }
 
-// cdic.sv:613: executing any command acknowledges a pending sector interrupt.
+// Executing any command acknowledges a pending sector interrupt.
 TEST_CASE("a new command clears XBUF bit 15") {
     CdicRig rig({kSubmodeData, kSubmodeData, kSubmodeData});
     rig.start_read(0);
@@ -101,7 +101,7 @@ TEST_CASE("Update during a seek raises no XBUF before the first sector") {
     CHECK(d[0].marker == FakeDisc::marker(1));
 }
 
-// cdic.sv spin_down_cnt: with no read, Update answers 2 sector ticks later.
+// With no read, Update answers 2 sector ticks later.
 TEST_CASE("Update with no read raises XBUF") {
     CdicRig rig({kSubmodeData});
     write_reg16(rig.cdic, 0x000, 0x002e);

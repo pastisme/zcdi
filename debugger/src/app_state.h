@@ -14,7 +14,6 @@
 #include "core/machine.h"
 #include "emu_runner.h"
 #include "stream_texture.h"
-#include "symbols.h"
 
 struct InputState {
     int dx = 0;
@@ -50,7 +49,6 @@ struct AppState {
     std::unique_ptr<zcdi::Machine> machine;
     std::unique_ptr<zcdi::Mixer> mixer;
     std::unique_ptr<EmuRunner> runner;
-    Symbols symbols;
     RunCommand command = RunCommand::kNone;
     uint32_t command_target = 0; // kRunTo
     // Bumped each time emulation stops for the user; widgets refresh on it.

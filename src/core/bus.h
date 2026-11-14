@@ -30,7 +30,7 @@ struct AudioStreams {
 
 // RAM goes through ram_state_io().
 struct BusSaveState {
-    // cditop.sv's irq_in4owner SR latch.
+    // Which device's request holds IN4 (an SR latch on the board).
     enum class In4Owner { kIdle, kCdic, kVmpeg } in4_owner_ = In4Owner::kIdle;
     bool last_reset_by_slave_ = false;
 
@@ -123,7 +123,7 @@ public:
 
     bool consume_slave_reset_request() { return slave_.consume_reset_request(); }
 
-    // While set, the playcdi overlay stays off (RTL last_reset_by_slave).
+    // While set, the playcdi overlay stays off.
     void note_reset_by_slave() { last_reset_by_slave_ = true; }
 
     bool playcdi_overlay_active() const {

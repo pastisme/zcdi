@@ -22,16 +22,16 @@ void msf_from_lba(int lba, uint8_t& m, uint8_t& s, uint8_t& f) {
     to_bcd_msf(std::max(lba, -150) + 150, m, s, f); // nothing before 00:00:00
 }
 
-// Independent 75 Hz sector tick (cdic_clock_gen.sv sector_tick).
+// Independent 75 Hz sector tick.
 constexpr int kCyclesPerSectorTick = kCpuClockHz / 75; // 200000
 
-// cdic.sv dbuf15_reset_cnt: sector ticks a read or seek keeps DBUF bit 15 (6f4ce1f).
+// Sector ticks a read or seek keeps DBUF bit 15.
 constexpr int kDbufTriggerResetTicks = 5;
 
 // The backends are synchronous, so a bad sector never turns good: bound retries.
 constexpr int kMaxReadFailStreak = 19;
 
-// CRC-16/CCITT, MSB-first (same_cdi s_crc_ccitt_table).
+// CRC-16/CCITT, MSB-first.
 uint16_t crc_ccitt_round(uint16_t crc, uint8_t data) {
     crc = uint16_t(crc ^ (uint16_t(data) << 8));
     for (int i = 0; i < 8; ++i) {
@@ -40,7 +40,7 @@ uint16_t crc_ccitt_round(uint16_t crc, uint8_t data) {
     return crc;
 }
 
-// same_cdi process_disc_sector. CRC bytes are 0xff while the CRC is computed.
+// CRC bytes are 0xff while the CRC is computed.
 void set_subq_crc(uint8_t out[kSubqSize]) {
     out[10] = 0xff;
     out[11] = 0xff;
@@ -68,7 +68,7 @@ void build_subq(int curr_lba, bool is_cdda, const std::vector<TocTrack>& tracks,
     }
     const int rel = std::abs(curr_lba - start);
 
-    // Q_CONTROL: 0x41 for a data track, 0x01 for CD-DA (same_cdi).
+    // Q_CONTROL: 0x41 for a data track, 0x01 for CD-DA.
     out[0] = is_cdda ? kQControlAudio : kQControlData;
     out[1] = track == kLeadOutTrack ? kLeadOutTrack : to_bcd(track);
     out[2] = curr_lba < start ? 0x00 : 0x01;
@@ -78,7 +78,7 @@ void build_subq(int curr_lba, bool is_cdda, const std::vector<TocTrack>& tracks,
     set_subq_crc(out);
 }
 
-// same_cdi lba_from_time: MSF inside the pregap clamps to 0; frame bit 7 = even second.
+// MSF inside the pregap clamps to 0; frame bit 7 = even second.
 int cdic_lba_from_time(uint32_t time) {
     int mins = from_bcd(uint8_t(time >> 24));
     int secs = from_bcd(uint8_t(time >> 16));
@@ -92,7 +92,7 @@ int cdic_lba_from_time(uint32_t time) {
     return lba;
 }
 
-// same_cdi get_sector_count_for_coding; 0 = reserved, poll again next tick.
+// 0 = reserved, poll again next tick.
 int get_sector_count_for_coding(uint8_t coding) {
     int count = 2;
     switch ((coding >> 4) & 3) { // bits per sample
@@ -104,7 +104,7 @@ int get_sector_count_for_coding(uint8_t coding) {
         case 0: break; // 37.8kHz
         case 1: count *= 2; break; // 18.9kHz: half-rate, twice the duration
         case 2: return 0; // reserved
-        case 3: break; // 44.1kHz slot: not an ADPCM rate, a no-op as in same_cdi
+        case 3: break; // 44.1kHz slot: not an ADPCM rate, a no-op
     }
     switch (coding & 3) { // channels
         case 0: count *= 2; break; // mono: half the data cost per sample-time
@@ -132,14 +132,14 @@ void Cdic::write_ram_byte(uint32_t offset, uint8_t v) {
     if (offset < ram_.size()) ram_[offset] = v;
 }
 
-// cdic.sv:336-337 (intreq is combinational).
+// The interrupt line follows the buffer and enable bits directly.
 void Cdic::raise_irq4() {
     irq4_ = ((x_buffer_ & kBufReady) && (data_buffer_ & kDbufActive)) ||
             ((audio_buffer_ & kBufReady) && (audio_control_ & kAudctlAbufIrq));
 }
 
 void Cdic::signal_sector() {
-    // cdic.sv: the first sector used ends a command's DBUF bit 15.
+    // The first sector used ends a command's DBUF bit 15.
     data_buffer_ &= ~kDbufTrigger;
     dbuf_trigger_reset_count_ = 0;
     x_buffer_ |= kBufReady;
@@ -224,7 +224,7 @@ void Cdic::write_reg_byte(uint32_t offset, uint8_t v) {
         case kRegAudctl + 1:
             audio_control_ = set_lo(audio_control_, v);
             handle_audctl_write(); // fires once the low byte completes the word, as DBUF below
-            raise_irq4(); // kAudctlAbufIrq gates the line at once (cdic.sv intreq is combinational)
+            raise_irq4(); // kAudctlAbufIrq gates the line at once
             return;
         case kRegInterruptVector: interrupt_vector_ = set_hi(interrupt_vector_, v); return;
         case kRegInterruptVector + 1: interrupt_vector_ = set_lo(interrupt_vector_, v); return;
@@ -240,7 +240,7 @@ void Cdic::write_reg_byte(uint32_t offset, uint8_t v) {
 
 namespace {
 // These start a read even mid-read. The Reset commands deliver no sector
-// and interrupt a few ticks later (cdic.sv, CDi_MiSTer 8cec2d4).
+// and interrupt a few ticks later.
 bool starts_disc_read_unconditionally(uint8_t command) {
     switch (command) {
         case kCmdFetchToc:
@@ -253,15 +253,15 @@ bool starts_disc_read_unconditionally(uint8_t command) {
 }
 } // namespace
 
-// same_cdi cdic_w/handle_cdic_command: trigger and active are independent checks.
+// Trigger and active are independent checks.
 void Cdic::handle_data_buffer_write(uint16_t value) {
     if (value & kDbufTrigger) {
         uint8_t command = uint8_t(command_ & 0xff);
-        // CD-DA mode lasts until the next command executes (cdic.sv read_cdda).
+        // CD-DA mode lasts until the next command executes.
         cdda_mode_ = command == kCmdPlayCdda;
         spin_down_count_ = 0; // a new command cancels a pending interrupt
         dbuf_trigger_reset_count_ = 0;
-        x_buffer_ &= ~kBufReady; // and acknowledges the last one (cdic.sv:613)
+        x_buffer_ &= ~kBufReady; // and acknowledges the last one
         if (command == kCmdResetMode1 || command == kCmdResetMode2) {
             stop_read();
             spin_down_count_ = command == kCmdResetMode1 ? 3 : 2;
@@ -271,7 +271,7 @@ void Cdic::handle_data_buffer_write(uint16_t value) {
             stop_read();
             curr_lba_ = 0;
         } else if (command == kCmdUpdate) {
-            // Cuts off the playing buffer (cdic.sv:651).
+            // Cuts off the playing buffer.
             if (audio_channel_ != 0 && !(audio_control_ & kAudctlRun)) abort_audio_playback();
             // Mid-read the next sector's XBUF answers it: cdapdriv takes any XBUF after Update as a sector.
             if (disc_command_ == kCmdIdle) spin_down_count_ = 2;
@@ -288,10 +288,10 @@ void Cdic::handle_data_buffer_write(uint16_t value) {
     if (!(value & kDbufActive)) {
         stop_read();
         curr_lba_ = 0;
-        // cdic.sv:793-797; kDbufBank1 was just written with `value`.
+        // kDbufBank1 was just written with `value`.
         data_target_buffer_ = false;
         audio_target_buffer_ = false;
-        audio_control_ &= ~kAudctlStoppedOnEnd; // cdic.sv:815
+        audio_control_ &= ~kAudctlStoppedOnEnd;
     }
 }
 
@@ -300,7 +300,7 @@ void Cdic::start_read(uint8_t command) {
     // Fetch TOC counts lead-in sectors instead (deliver_toc_sector).
     curr_lba_ = command == kCmdFetchToc ? 0 : cdic_lba_from_time(time_);
     read_fail_streak_ = 0;
-    // CDi_MiSTer hps_cd_sector_cache.sv kSeekTime (~253 ms).
+    // Seek time, ~253 ms.
     spinup_counter_ = 19;
     sector_cycle_accum_ = 0;
 }
@@ -312,7 +312,7 @@ void Cdic::stop_read() {
 }
 
 void Cdic::tick_cycles(int cpu_cycles) {
-    // Runs whether or not the disc reads (same_cdi m_audio_timer).
+    // Runs whether or not the disc reads.
     audio_map_cycle_accum_ += cpu_cycles;
     while (audio_map_cycle_accum_ >= kCyclesPerSectorTick) {
         audio_map_cycle_accum_ -= kCyclesPerSectorTick;
@@ -344,7 +344,7 @@ void Cdic::tick_cycles(int cpu_cycles) {
 }
 
 bool Cdic::is_mode2_sector_selected(const RawSector& s) const {
-    if (s.sub.file != uint8_t(file_ >> 8)) return false; // FILE's high byte only (cdic.sv:453)
+    if (s.sub.file != uint8_t(file_ >> 8)) return false; // FILE's high byte only
     uint8_t submode = s.sub.submode;
     if (submode & (kSubmodeEof | kSubmodeTrig | kSubmodeEor)) return true; // control sectors always pass
     if (!(submode & (kSubmodeData | kSubmodeAudio | kSubmodeVideo))) return false; // empty/message sector
@@ -366,7 +366,7 @@ bool Cdic::next_data_bank() {
 }
 
 void Cdic::pack_into_ram(const RawSector& s) {
-    // same_cdi process_sector_data layout: sync dropped, synthesized Q subcode after.
+    // Sync dropped, synthesized Q subcode after.
     uint32_t offset = next_data_bank() ? kDataBank1 : kDataBank0;
 
     auto write_bytes = [&](const uint8_t* src, uint32_t n) {
@@ -374,11 +374,11 @@ void Cdic::pack_into_ram(const RawSector& s) {
         offset += n;
     };
 
-    // HEADER..CODING1 (8 bytes: same_cdi's SECTOR_HEADER..SECTOR_FILE2).
+    // HEADER..CODING1 (8 bytes).
     write_bytes(s.data + kSyncSize, kFile2Offset - kSyncSize);
 
     // The audio payload goes 0x1400 words on, in the audio toggle's bank, which
-    // kDbufBank1 then reports (cdic.sv:512, cdic.sv:610).
+    // kDbufBank1 then reports.
     if (disc_command_ == kCmdReadMode2 && is_mode2_audio_selected(s)) {
         data_buffer_ =
             uint16_t((data_buffer_ & ~kDbufBank1) | kDbufAudio | (audio_target_buffer_ ? kDbufBank1 : kDbufBank0));
@@ -386,7 +386,7 @@ void Cdic::pack_into_ram(const RawSector& s) {
         audio_target_buffer_ = !audio_target_buffer_;
     }
 
-    // FILE2..end (same_cdi's SECTOR_FILE2..SECTOR_SIZE).
+    // FILE2..end.
     write_bytes(s.data + kFile2Offset, kRawSectorSize - kFile2Offset);
 
     // One byte per RAM word, zero-extended.
@@ -405,8 +405,7 @@ void Cdic::handle_audctl_write() {
             // ADPCM starts at kAudioMap0; CD-DA at the buffer kDbufBank1 names
             // (process_audio_map).
             decode_addr_ = 0xffff;
-            // An idle player starts now, not on the next 75 Hz tick as in same_cdi
-            // (audioplayer.sv decoder_start).
+            // An idle player starts now, not on the next 75 Hz tick.
             if (audio_format_sectors_ == 0) {
                 audio_sector_counter_ = 1;
                 audio_map_cycle_accum_ = kCyclesPerSectorTick;
@@ -420,7 +419,7 @@ void Cdic::handle_audctl_write() {
     if (audio_channel_ != 0) abort_audio_playback();
 }
 
-// cdic.sv audio_abort_playback: undrained samples dropped, no ABUF.
+// Aborted playback: undrained samples dropped, no ABUF.
 void Cdic::abort_audio_playback() {
     decoding_audio_map_ = false;
     audio_format_sectors_ = 0;
@@ -441,10 +440,10 @@ void Cdic::audio_map_tick() {
     if (decoding_audio_map_) process_audio_map();
 }
 
-// kAudioMapEnd stops the player (cdic.sv decoder_disable_audiomap).
+// kAudioMapEnd stops the player.
 void Cdic::process_audio_map() {
     if (cdda_mode_) {
-        // cdic.sv read_cdda: one raw sector per buffer, one tick long.
+        // One raw sector per buffer, one tick long.
         if (decode_addr_ != kCddaBank0 && decode_addr_ != kCddaBank1) {
             decode_addr_ = uint16_t((data_buffer_ & kDbufBank1) ? kCddaBank1 : kCddaBank0);
         }
@@ -489,7 +488,7 @@ void Cdic::pack_cdda_into_ram(const RawSector& s, const uint8_t* subq, const uin
         }
         pcm = swapped;
     }
-    // Q subcode where a data sector's goes (cdic.sv:566-575, 618-626).
+    // Q subcode where a data sector's goes.
     const bool data_bank = next_data_bank();
     std::memcpy(ram_.data() + (data_bank ? kCddaBank1 : kCddaBank0), pcm, kRawSectorSize);
     uint32_t q = (data_bank ? kDataBank1 : kDataBank0) + kSubqOffset;
@@ -504,7 +503,7 @@ void Cdic::pack_cdda_into_ram(const RawSector& s, const uint8_t* subq, const uin
     }
 }
 
-// Lead-in TOC, each entry 3 times, the table repeated (CDi_MiSTer sim2/table_of_contents.h).
+// Lead-in TOC, each entry 3 times, the table repeated.
 void Cdic::deliver_toc_sector() {
     static const std::vector<TocTrack> kNoTracks{TocTrack{1, false, 0}};
     const std::vector<TocTrack>& tracks = tracks_.empty() ? kNoTracks : tracks_;
@@ -556,7 +555,7 @@ bool Cdic::process_sector() {
     if (disc_command_ == kCmdPlayCdda && curr_lba_ >= disc_->lead_out_lba()) {
         s = RawSector{};
     } else if (!disc_->read_sector(curr_lba_, s)) {
-        // Hardware waits when starved (hps_cd_sector_cache.sv:79-80); a read past
+        // Hardware waits when starved; a read past
         // the end is fatal (Green Book), and so is a failure streak.
         if (curr_lba_ >= disc_->lead_out_lba() || ++read_fail_streak_ > kMaxReadFailStreak) {
             disc_command_ = kCmdIdle;
@@ -566,7 +565,7 @@ bool Cdic::process_sector() {
     }
     read_fail_streak_ = 0;
 
-    // Play CDDA: no filter, every sector interrupts (cdic.sv:578-607).
+    // Play CDDA: no filter, every sector interrupts.
     if (disc_command_ == kCmdPlayCdda) {
         uint8_t subq[kSubqSize];
         build_subq(curr_lba_, true, tracks_, disc_->lead_out_lba(), subq);
@@ -577,14 +576,14 @@ bool Cdic::process_sector() {
         return true;
     }
 
-    // The filter is for Read Mode2 only (same_cdi DISC_MODE2).
+    // The filter is for Read Mode2 only.
     bool deliver = (disc_command_ == kCmdReadMode2) ? is_mode2_sector_selected(s) : true;
     if (deliver) {
         pack_into_ram(s);
         signal_sector();
     }
 
-    // EOF never stops a read (cdic.sv:478-482); only clearing kDbufActive does.
+    // EOF never stops a read; only clearing kDbufActive does.
     return true;
 }
 

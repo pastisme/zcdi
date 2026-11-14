@@ -25,7 +25,7 @@ bool is_raw_2352(const std::string& type) {
            type == "CDI/2352" || type == "AUDIO";
 }
 
-// As MAME cdrom.cpp: logframeofs in disc-wide LBAs, chdframeofs in CHD frames.
+// Offsets in disc-wide LBAs and in CHD frames.
 struct Track {
     uint32_t frames = 0; // frames physically present for this track
     uint32_t logframeofs = 0;
@@ -188,7 +188,7 @@ private:
             };
 
             log_ofs += t.frames;
-            // chdman's padding (MAME cdrom.cpp extraframes) has no LBA.
+            // chdman's padding has no LBA.
             chd_ofs += (t.frames + CD_TRACK_PADDING - 1) / CD_TRACK_PADDING * CD_TRACK_PADDING;
             log_ofs += static_cast<uint32_t>(postgap); // postgap counts against the next track
 

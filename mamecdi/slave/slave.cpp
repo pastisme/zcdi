@@ -76,7 +76,7 @@ uint8_t SlaveHle::read_byte(uint32_t addr) {
     if (channel >= kNumChannels) return kIdleByte;
 
     Channel& c = channels_[channel];
-    if (c.out_pos >= c.out_len) return kIdleByte; // matches MAME's uncommitted-read default
+    if (c.out_pos >= c.out_len) return kIdleByte;
 
     uint8_t v = c.out[c.out_pos++];
     if (c.out_pos >= c.out_len) {
@@ -114,7 +114,7 @@ void SlaveHle::queue_master_volume_reply() {
     queue_response(kChannelControl, r, 2);
 }
 
-// As MAME slave_w: an unmatched byte resets the channel's input at once, and
+// An unmatched byte resets the channel's input at once, and
 // unknown opcodes get no answer.
 void SlaveHle::handle_write(int channel, uint8_t v) {
     Channel& c = channels_[channel];
@@ -141,7 +141,7 @@ void SlaveHle::handle_write(int channel, uint8_t v) {
             case kChannelLcd: return; // no opcode starts a sequence on this channel
             case kChannelControl:
                 // Bit 7 set = a command on its own (firmware 0x48d). 0xf0 (LCD) takes no
-                // bytes here; its text comes on channel 1, unlike MAME's 16-byte form.
+                // bytes here; its text comes on channel 1.
                 if (level_mode_ || v < 0x80) {
                     channel2_data(v);
                     return;
@@ -349,7 +349,7 @@ void SlaveHle::enter_tray_state(uint8_t state) {
 void SlaveHle::report_disc_status() {
     // Type 00 until the TOC is read (0x1acb clears it), then 01 audio, 03 no disc.
     // Servo 2.1 gives 0x02 for a CD-i TOC (disc type 0x10, Green Book VII.10.1.a), as our CDIC TOC
-    // says; kept at 0x04 as measured on a 210/05 (CDi_MiSTer). The BIOS treats 0x02 and 0x04 alike.
+    // says; kept at 0x04 as measured on a 210/05. The BIOS treats 0x02 and 0x04 alike.
     uint8_t type = kDiscUnknown;
     if (tray_state_ == kTrayClosed && tray_timer_ == 0)
         type = !disc_present_ ? kDiscNone : disc_audio_ ? kDiscAudio : kDiscCdi;
@@ -515,7 +515,7 @@ void SlaveHle::attenuate(std::vector<int16_t>& interleaved_stereo) {
         const int l = interleaved_stereo[f * 2];
         const int r = interleaved_stereo[f * 2 + 1];
         // Straight plus cross path; an AD7528 passes code/256, scaled 9/16 for
-        // the 210/05's headroom as MPEG audio is (dual_ad7528.sv scaled_shiftreg).
+        // the 210/05's headroom as MPEG audio is.
         auto gain = [&](int i) { return dac[i] * 9 / 16; };
         interleaved_stereo[f * 2] = clamp16((l * gain(0) + r * gain(3)) >> 8);
         interleaved_stereo[f * 2 + 1] = clamp16((r * gain(2) + l * gain(1)) >> 8);

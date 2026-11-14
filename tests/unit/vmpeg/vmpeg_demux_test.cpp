@@ -1,5 +1,4 @@
-// The FMV and FMA demuxers hand the decoders only PES payload (vmpeg.sv:89/150,
-// mpeg_demuxer.sv mpeg_packet_body) and raise program end themselves.
+// The FMV and FMA demuxers hand the decoders only PES payload and raise program end themselves.
 #include "doctest.h"
 
 #include <cstdint>
@@ -61,7 +60,7 @@ TEST_CASE("the FMA demuxer keeps the audio payload and reports program end") {
     stream.insert(stream.end(), {0x00, 0x00, 0x01, 0xb9});
     VmpegFeed feed(/*audio=*/true);
     CHECK(feed.push(stream.data(), stream.size(), /*audio=*/true) == payload);
-    // FMA_ISR bit 0, ISO end (vmpeg.sv:736-742).
+    // FMA_ISR bit 0, ISO end.
     CHECK((zcdi_test::read16(feed.device(), zcdi_test::kFmaIsrOffset) & 1) != 0);
 }
 

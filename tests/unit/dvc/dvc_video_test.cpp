@@ -71,7 +71,7 @@ TEST_CASE("queued pictures show in order with no drops") {
     CHECK(v.queue_depth() == 0u);
 }
 
-// pl_mpeg.h plm_video_decode(): a sequence header with a reference picture held ends
+// A sequence header with a reference picture held ends
 // the sequence first; only a real sequence end code raises ESI.
 TEST_CASE("a sequence header pushes the held picture out without ESI") {
     DvcVideo v;
@@ -119,7 +119,7 @@ TEST_CASE("unfed instance is inert") {
 }
 
 // ---- FMV "Clear FIFO" (DvcVideo::clear_fifo) --------------------------------
-// vmpeg.sv SYSCMD 0x0100: drops bitstream and queued pictures, keeps the shown frame.
+// SYSCMD Clear FIFO: drops bitstream and queued pictures, keeps the shown frame.
 // Both shapes go through VmpegDevice's demuxer, as in Bus.
 namespace {
 size_t cut_offset(bool es) { return es ? kClipAEsCutOffset : kClipAPsCutOffset; }
@@ -312,7 +312,7 @@ TEST_CASE("after clear fifo, open-GOP B pictures don't depend on earlier picture
     CHECK(short_history == long_history);
 }
 
-// sw/mpeg_video/main.c push_frame(): GOP on the first I shown after temporal
+// GOP on the first I shown after temporal
 // reference 0, SEQ on the first such I after a sequence header.
 TEST_CASE("GOP and SEQ flags mark the first I picture shown in each GOP") {
     DvcVideo v;
@@ -382,8 +382,8 @@ TEST_CASE("program stream video follows the stream number") {
 }
 
 // seconds << 22 | pictures << 16 | hours << 6 | minutes; GOP k is 00:00:00:k.
-// The decoder time code follows decoding (mpeg_video.sv event_frame_decoded). Every
-// picture here has its own sequence header, which pushes the held one out (pl_mpeg.h),
+// The decoder time code follows decoding. Every
+// picture here has its own sequence header, which pushes the held one out,
 // so decoding is never a reference picture ahead.
 TEST_CASE("pictures carry their GOP time code") {
     DvcVideo v;
@@ -397,8 +397,8 @@ TEST_CASE("pictures carry their GOP time code") {
     }
 }
 
-// mpeg_video.sv: Decoder Off resets the decoder and reset_persistent_storage
-// drops has_sequence_header; Clear FIFO keeps it.
+// Decoder Off resets the decoder and forgets the sequence header; Clear FIFO
+// keeps it.
 TEST_CASE("decoder off forgets the sequence header, clear fifo keeps it") {
     std::vector<uint8_t> all(kClipAEs, kClipAEs + sizeof(kClipAEs));
     const uint8_t kGop[] = {0, 0, 1, 0xb8};
