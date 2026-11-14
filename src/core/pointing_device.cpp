@@ -33,8 +33,9 @@ bool PointingDeviceSaveState::state_valid() const {
 
 void PointingDevice::set_input(const Input& input) {
     input_ = input;
-    mouse_acc_x_ += input.mouse_dx;
-    mouse_acc_y_ += input.mouse_dy;
+    // 13-bit accumulators.
+    mouse_acc_x_ = std::clamp(mouse_acc_x_ + input.mouse_dx, -4096, 4095);
+    mouse_acc_y_ = std::clamp(mouse_acc_y_ + input.mouse_dy, -4096, 4095);
 }
 
 void PointingDevice::relative_packet() {
@@ -65,8 +66,9 @@ void PointingDevice::relative_packet() {
         y_q_ = y;
         b1_q_ = b1;
         b2_q_ = b2;
-        mouse_acc_x_ = 0;
-        mouse_acc_y_ = 0;
+        // A saturated mouse move goes on in the next packets.
+        mouse_acc_x_ = digital || analog ? 0 : mouse_acc_x_ - x;
+        mouse_acc_y_ = digital || analog ? 0 : mouse_acc_y_ - y;
     }
     accel_ = !digital ? 0 : accel_ < 7 ? accel_ + 1 : accel_;
 }

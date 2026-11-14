@@ -965,7 +965,7 @@ void Mcd212::update_cursor_blink() {
 
 // X is a Double Resolution column, Y a line, both from the active area's origin.
 void Mcd212::draw_cursor() {
-    if (!(cursor_control_ & kCurcntEn)) return;
+    if (!(cursor_control_ & kCurcntEn) || !(dcr_[0] & kDcrDe)) return;
     // Off phase: BLKC 0 hides the cursor, BLKC 1 complements its colour.
     if (cursor_blink_state_ && !(cursor_control_ & kCurcntBlkc)) return;
     int cursor_x = int(cursor_position_ & 0x3ffu);
@@ -1062,14 +1062,19 @@ void Mcd212::end_of_line(int line, const uint8_t* plane_a, const uint8_t* plane_
     const int y = line - first_active_line_;
     if (y >= 0 && y < active_height_) {
         render_line(y, plane_a, plane_b, plane_size);
+        const bool display_enabled = (dcr_[0] & kDcrDe) != 0;
+        // FMV still shows on backdrop pixels.
+        if (!display_enabled) {
+            std::fill_n(fb_.begin() + static_cast<std::ptrdiff_t>(y) * kFbWidth, kFbWidth, kStudioBlack);
+        }
         output_row(y);
         // vsd = backdrop pixel and EV; EV can change per line.
         if (!icm_ev_) {
             std::fill_n(backdrop_mask_.begin() + static_cast<std::ptrdiff_t>(y) * kFbWidth, kFbWidth, uint8_t{0});
         }
         // DCA in the horizontal blanking after its line.
-        if (dcr_[0] & kDcrDc) process_dca(0, plane_a, plane_size);
-        if (dcr_[1] & kDcrDc) process_dca(1, plane_b, plane_size);
+        if (display_enabled && (dcr_[0] & kDcrDc)) process_dca(0, plane_a, plane_size);
+        if (display_enabled && (dcr_[1] & kDcrDc)) process_dca(1, plane_b, plane_size);
     }
     if (y + 1 == 0 && active_height_ > 0) csr1r_ |= kCsr1rDa; // the next line is active
     if (y + 1 == active_height_ || (line == field_lines_ - 1 && !vertical_blank_started_)) {

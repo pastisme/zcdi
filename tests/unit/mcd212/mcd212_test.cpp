@@ -194,6 +194,7 @@ TEST_CASE("the cursor is drawn over DVC video") {
         // Full-screen window, shown.
         mcd.set_dvc_window(0, 0, kLineWidth, kFbHeight, 0, 0, /*show=*/true, /*vcd_pixel_clock=*/false);
         load_register(mcd, 0, kRegImageCodingMethod, kIcmEv);
+        write_mmio16(mcd, kDcr1, kDcrDe);
         load_register(mcd, 0, kRegCursorControl, kCurcntEn | (complementary ? kCurcntBlkc : 0u) | kCursorBlink | 0xcu);
         load_register(mcd, 0, kRegCursorPosition, (100u << 12) | 200u);  // X is in 768-wide units
         for (uint32_t row = 0; row < 16; ++row) load_register(mcd, 0, kRegCursorPattern, row << 16 | 0xffffu);
@@ -238,6 +239,7 @@ TEST_CASE("DVC video needs a latched window and Show") {
         mcd.set_dvc_frame(video, 32, 16);
         mcd.set_dvc_window(/*scrpos=*/10, 20, win_w, win_h, /*decoff=*/0, 0, show, /*vcd_pixel_clock=*/false);
         load_register(mcd, 0, kRegImageCodingMethod, kIcmEv);
+        write_mmio16(mcd, kDcr1, kDcrDe);
         zcdi_test::run_field(mcd, planes[0], planes[1], sizeof(planes[0]));
         return fb_at(mcd, x, y);
     };

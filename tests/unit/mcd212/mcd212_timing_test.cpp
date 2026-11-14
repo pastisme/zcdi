@@ -9,6 +9,7 @@
 #include "support/mcd212_regs.h"
 
 using zcdi::mamecdi::Mcd212;
+using zcdi_test::load_register;
 using zcdi_test::write_mmio16;
 using namespace zcdi::mamecdi::mcd212;
 
@@ -61,12 +62,37 @@ TEST_CASE("the ICA interrupts as blanking starts, the first DCA after the first 
     for (int line = kFirstActive + kActive; line < kPalLines; ++line) mcd.end_of_line(line, a, planes[1], sizeof(planes[0]));
     mcd.end_field();
 
-    write_mmio16(mcd, kDcr1, kDcrIc | kDcrDc);  // IC | DC
+    write_mmio16(mcd, kDcr1, kDcrDe | kDcrIc | kDcrDc);
     mcd.begin_field(kPalLines);
     for (int line = 0; line < kFirstActive; ++line) mcd.end_of_line(line, a, planes[1], sizeof(planes[0]));
     CHECK_FALSE(ack());
     mcd.end_of_line(kFirstActive, a, planes[1], sizeof(planes[0]));
     CHECK(ack());  // the DCA ran in the blanking after the first active line
+}
+
+// The DCA and the picture need DE; the ICA doesn't.
+TEST_CASE("with DE clear, the DCA doesn't run and the display is black") {
+    static uint8_t planes[2][0x80000] = {};
+    uint8_t* a = planes[0];
+    put32(a + 0x400, 0x30001000u);  // ICA: RELOAD DCP 0x1000 + STOP
+    put32(a + 0x1000, 0x60000000u);  // DCA: INTERRUPT
+    put32(a + 0x1004, 0x00000000u);  // STOP
+    Mcd212 mcd;
+    load_register(mcd, 0, kRegBackdropColor, 0xc);  // red
+    auto ack = [&] { return (mcd.read_byte(kCsr2R) & 0x04) != 0; };
+    auto first_active_pixel = [&] { return mcd.framebuffer()[0]; };
+
+    write_mmio16(mcd, kDcr1, kDcrIc);  // sets DCP
+    zcdi_test::run_field(mcd, a, planes[1], sizeof(planes[0]));
+    write_mmio16(mcd, kDcr1, kDcrIc | kDcrDc);  // no DE
+    zcdi_test::run_field(mcd, a, planes[1], sizeof(planes[0]));
+    CHECK_FALSE(ack());
+    CHECK(first_active_pixel() == 0x00101010u);
+
+    write_mmio16(mcd, kDcr1, kDcrDe | kDcrIc | kDcrDc);
+    zcdi_test::run_field(mcd, a, planes[1], sizeof(planes[0]));
+    CHECK(ack());
+    CHECK(first_active_pixel() != 0x00101010u);
 }
 
 }  // TEST_SUITE

@@ -64,12 +64,13 @@ TEST_CASE("a pad sends while held and once when it stops") {
     CHECK(run(p, 6).empty());
 }
 
-TEST_CASE("a mouse sends its motion saturated to 127") {
+TEST_CASE("a mouse sends its motion saturated to 127, the rest in the next packet") {
     PointingDevice p(DeviceId::kRelative);
     identify(p);
     p.set_input({.mouse_dx = 200, .mouse_dy = -2});
     p.set_input({});  // the next frame: nothing more
     CHECK(run(p, 3) == std::vector<int>{0xcd, 0xbf, 0xbe});
+    CHECK(run(p, 3) == std::vector<int>{0xc1, 0x89, 0x80});  // 73 left
     CHECK(run(p, 3) == std::vector<int>{0xc0, 0x80, 0x80});  // stopped
     CHECK(run(p, 6).empty());
 }
