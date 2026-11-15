@@ -43,7 +43,10 @@ set(ZCDI_SOURCES
     src/disc/m3u_parser.cpp
     src/disc/raw2352_disc.cpp
     src/disc/chd_disc.cpp
+    src/chips/mcd212/compositor.cpp
+    src/chips/mcd212/ica_dca.cpp
     src/chips/mcd212/mcd212.cpp
+    src/chips/mcd212/plane_decode.cpp
     src/chips/scc68070/scc68070.cpp
     src/chips/slave/slave.cpp
     src/chips/cdic/cdic.cpp

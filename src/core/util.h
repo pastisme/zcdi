@@ -33,10 +33,20 @@ constexpr uint8_t clamp_u8(int v) { return uint8_t(std::clamp(v, 0, 255)); }
 constexpr uint16_t set_hi(uint16_t reg, uint8_t v) { return uint16_t((reg & 0x00ff) | (v << 8)); }
 constexpr uint16_t set_lo(uint16_t reg, uint8_t v) { return uint16_t((reg & 0xff00) | v); }
 
+// Big-endian: an even offset is the high byte.
+constexpr uint8_t byte_lane(uint16_t reg, uint32_t offset) { return uint8_t(offset & 1 ? reg : reg >> 8); }
+constexpr uint16_t set_byte_lane(uint16_t reg, uint32_t offset, uint8_t v) {
+    return offset & 1 ? set_lo(reg, v) : set_hi(reg, v);
+}
+
 // One byte lane of a wider register, `shift` bits up.
 template <class T>
 constexpr T set_byte(T reg, int shift, uint8_t v) {
     return T((reg & ~(T(0xff) << shift)) | (T(v) << shift));
+}
+
+constexpr uint32_t set_half(uint32_t reg, int shift, uint16_t v) {
+    return (reg & ~(0xffffu << shift)) | (uint32_t(v) << shift);
 }
 
 } // namespace zcdi

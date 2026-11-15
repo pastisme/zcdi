@@ -176,6 +176,8 @@ public:
     std::vector<int16_t> drain_audio();
 
 private:
+    uint16_t register_word(uint32_t offset) const;
+    void set_register_word(uint32_t offset, uint16_t value);
     void handle_data_buffer_write(uint16_t value);
     void start_read(uint8_t command);
     // Ends the disc read (curr_lba_ is kept).

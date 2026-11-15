@@ -195,6 +195,9 @@ constexpr uint32_t k4bppColor[16] = {
     0x101010, 0x1010e6, 0x10e610, 0x10e6e6, 0xe61010, 0xe610e6, 0xe6e610, 0xe6e6e6,
 };
 
+// What a plane shows where it has no pixels.
+constexpr uint32_t kStudioBlack = 0x00101010u;
+
 // DYUV delta per 4-bit code.
 constexpr uint8_t kDyuvDeltas[16] = {0, 1, 4, 9, 16, 27, 44, 79, 128, 177, 212, 229, 240, 247, 252, 255};
 
@@ -336,33 +339,35 @@ public:
     }
 
 private:
-    void start_vertical_blank(const uint8_t* plane_a, const uint8_t* plane_b, std::size_t plane_size);
-    void process_ica(int path, const uint8_t* plane_ram, std::size_t plane_size);
-    void process_dca(int path, const uint8_t* plane_ram, std::size_t plane_size);
+    // mcd212.cpp
+    uint16_t mmio_word(uint32_t offset) const;
+    void set_mmio_word(uint32_t offset, uint16_t value);
     void set_register(int path, uint8_t reg, uint32_t value);
-    // VSR as its 22-bit address: DCR bits 0-5 above the 16 VSR bits.
+    // 22-bit addresses: the high 6 bits are in DCR (VSR) or DDR (DCP).
     uint32_t vsr_address(int path) const;
     void set_vsr_address(int path, uint32_t address);
-    // Region arrays are rebuilt lazily, before the next line.
-    void invalidate_region_arrays();
-    void update_region_arrays();
-    void fill_region_arrays();
-    void render_line(int line, const uint8_t* plane_a, const uint8_t* plane_b, std::size_t plane_size);
-    void render_line_rgb555(uint32_t* row, bool* t_bit, const uint8_t* plane_a, const uint8_t* plane_b,
-                            std::size_t plane_size);
-    void apply_pixel_hold(int path, uint32_t* row, bool* opaque, int width) const;
-    // `step` 2 fills kLineWidth pixels, one per identical column pair.
-    void decode_plane_row(int path, const uint8_t* plane_ram, std::size_t plane_size, uint32_t* row, int step = 1);
-    void composite_row(const uint32_t* row_a, const uint32_t* row_b, int width, int step, uint32_t* row,
-                       uint8_t* mask) const;
+    uint32_t dcp_address(int path) const;
+    void set_dcp_address(int path, uint32_t address);
+    void start_vertical_blank(const uint8_t* plane_a, const uint8_t* plane_b, std::size_t plane_size);
+    void output_row(int y);
+    void rebuild_after_load();
+
+    // ica_dca.cpp
+    void process_ica(int path, const uint8_t* plane_ram, std::size_t plane_size);
+    void process_dca(int path, const uint8_t* plane_ram, std::size_t plane_size);
+
+    // plane_decode.cpp
     // The decoders set `present` false where the plane shows nothing;
     // transparency is decided later, in decode_plane_row.
-    void decode_double_res_line(int path, const uint8_t* plane_ram, std::size_t plane_size, uint32_t* row,
-                                bool* present);
     bool plane_parked(int path) const;
     void decode_plane_line(int path, const uint8_t* plane_ram, std::size_t plane_size, uint32_t* row, bool* present);
+    void decode_double_res_line(int path, const uint8_t* plane_ram, std::size_t plane_size, uint32_t* row,
+                                bool* present);
     void render_line_rle(int path, uint32_t* row, bool* present, const uint8_t* plane_ram, std::size_t plane_mask);
+    void render_line_rgb555(uint32_t* row, bool* t_bit, const uint8_t* plane_a, const uint8_t* plane_b,
+                            std::size_t plane_size);
     void decode_dyuv_line(const uint8_t* src, uint32_t* row, uint32_t dyuv_abs_start) const;
+    void apply_pixel_hold(int path, uint32_t* row, bool* opaque, int width) const;
     struct ClutIndex {
         bool valid = false; // false: the plane shows flat gray
         uint8_t mask = 0;
@@ -371,6 +376,19 @@ private:
     ClutIndex clut_index(int path, uint8_t icm) const;
     uint32_t clut_color(const ClutIndex& index, uint8_t byte) const;
     uint32_t clut_pixel(int path, uint8_t byte, uint8_t icm) const;
+
+    // compositor.cpp
+    void render_line(int line, const uint8_t* plane_a, const uint8_t* plane_b, std::size_t plane_size);
+    // `step` 2 fills kLineWidth pixels, one per identical column pair.
+    void decode_plane_row(int path, const uint8_t* plane_ram, std::size_t plane_size, uint32_t* row, int step = 1);
+    void composite_row(const uint32_t* row_a, const uint32_t* row_b, int width, int step, uint32_t* row,
+                       uint8_t* mask) const;
+    uint32_t composite_pixel(uint32_t color_a, bool opaque_a, uint32_t color_b, bool opaque_b, uint8_t weight_a,
+                             uint8_t weight_b) const;
+    // Region arrays are rebuilt lazily, before the next line.
+    void invalidate_region_arrays();
+    void update_region_arrays();
+    void fill_region_arrays();
     // `x` is the Double Resolution column (for the region flags).
     bool plane_transparent(int path, uint32_t color, int x) const;
     // plane_transparent() split into the per-line part and the per-pixel test.
@@ -385,8 +403,6 @@ private:
     TransparencyRule transparency_rule(int path) const;
     bool is_transparent(const TransparencyRule& rule, uint32_t color, int x) const;
     bool rgb555_transparent(int x, bool transparency_bit) const;
-    uint32_t composite_pixel(uint32_t color_a, bool opaque_a, uint32_t color_b, bool opaque_b, uint8_t weight_a,
-                             uint8_t weight_b) const;
     void update_cursor_blink();
     void draw_cursor();
     void overlay_dvc_frame();
@@ -426,14 +442,11 @@ private:
     int field_lines_ = 312;
     int first_active_line_ = 26;
     bool vertical_blank_started_ = false;
-    void output_row(int y);
     double display_aspect_ = 4.0 / 3.0;
 
     // 1 where neither plane is opaque and EV is set: where DVC video shows.
     // Bytes, not vector<bool>: written for every pixel.
     std::vector<uint8_t> backdrop_mask_;
-
-    void rebuild_after_load();
 };
 
 } // namespace chips

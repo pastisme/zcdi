@@ -147,94 +147,79 @@ void Cdic::signal_sector() {
     raise_irq4();
 }
 
-uint8_t Cdic::read_reg_byte(uint32_t offset) {
+uint16_t Cdic::register_word(uint32_t offset) const {
     switch (offset) {
-        case kRegCommand: return uint8_t(command_ >> 8);
-        case kRegCommand + 1: return uint8_t(command_);
-        case kRegTime: return uint8_t(time_ >> 24);
-        case kRegTime + 1: return uint8_t(time_ >> 16);
-        case kRegTime + 2: return uint8_t(time_ >> 8);
-        case kRegTime + 3: return uint8_t(time_);
-        case kRegFile: return uint8_t(file_ >> 8);
-        case kRegFile + 1: return uint8_t(file_);
-        case kRegChannel: return uint8_t(channel_ >> 24);
-        case kRegChannel + 1: return uint8_t(channel_ >> 16);
-        case kRegChannel + 2: return uint8_t(channel_ >> 8);
-        case kRegChannel + 3: return uint8_t(channel_);
-        case kRegAudioChannel: return uint8_t(audio_channel_ >> 8);
-        case kRegAudioChannel + 1: return uint8_t(audio_channel_);
-        case kRegAbuf: {
-            uint8_t v = uint8_t(audio_buffer_ >> 8);
-            audio_buffer_ &= ~kBufReady; // acknowledges + re-evaluates IN4
-            raise_irq4();
-            return v;
-        }
-        case kRegAbuf + 1: return uint8_t(audio_buffer_);
-        case kRegXbuf: {
-            uint8_t v = uint8_t(x_buffer_ >> 8);
-            x_buffer_ &= ~kBufReady; // acknowledges + re-evaluates IN4
-            raise_irq4();
-            return v;
-        }
-        case kRegXbuf + 1: return uint8_t(x_buffer_);
-        case kRegAudctl: return uint8_t(audio_control_ >> 8);
-        case kRegAudctl + 1: {
-            uint8_t v = uint8_t(audio_control_);
-            audio_control_ &= ~kAudctlStoppedOnEnd;
-            return v;
-        }
-        case kRegInterruptVector: return uint8_t(interrupt_vector_ >> 8);
-        case kRegInterruptVector + 1: return uint8_t(interrupt_vector_);
-        case kRegDbuf: return uint8_t(data_buffer_ >> 8);
-        case kRegDbuf + 1: return uint8_t(data_buffer_);
-        default: return 0; // DMA control (write-only) and unmapped offsets
+        case kRegCommand: return command_;
+        case kRegTime: return uint16_t(time_ >> 16);
+        case kRegTime + 2: return uint16_t(time_);
+        case kRegFile: return file_;
+        case kRegChannel: return uint16_t(channel_ >> 16);
+        case kRegChannel + 2: return uint16_t(channel_);
+        case kRegAudioChannel: return audio_channel_;
+        case kRegAbuf: return audio_buffer_;
+        case kRegXbuf: return x_buffer_;
+        case kRegDmaControl: return dma_control_;
+        case kRegAudctl: return audio_control_;
+        case kRegInterruptVector: return interrupt_vector_;
+        case kRegDbuf: return data_buffer_;
+        default: return 0;
     }
 }
 
-void Cdic::write_reg_byte(uint32_t offset, uint8_t v) {
+void Cdic::set_register_word(uint32_t offset, uint16_t v) {
     switch (offset) {
-        case kRegCommand: command_ = set_hi(command_, v); return;
-        case kRegCommand + 1: command_ = set_lo(command_, v); return;
-        case kRegTime: time_ = set_byte(time_, 24, v); return;
-        case kRegTime + 1: time_ = set_byte(time_, 16, v); return;
-        case kRegTime + 2: time_ = set_byte(time_, 8, v); return;
-        case kRegTime + 3: time_ = set_byte(time_, 0, v); return;
-        case kRegFile: file_ = set_hi(file_, v); return;
-        case kRegFile + 1: file_ = set_lo(file_, v); return;
-        case kRegChannel: channel_ = set_byte(channel_, 24, v); return;
-        case kRegChannel + 1: channel_ = set_byte(channel_, 16, v); return;
-        case kRegChannel + 2: channel_ = set_byte(channel_, 8, v); return;
-        case kRegChannel + 3: channel_ = set_byte(channel_, 0, v); return;
-        case kRegAudioChannel: audio_channel_ = set_hi(audio_channel_, v); return;
-        case kRegAudioChannel + 1: audio_channel_ = set_lo(audio_channel_, v); return;
-        case kRegAbuf:
-            audio_buffer_ = set_hi(audio_buffer_, v);
-            raise_irq4();
-            return;
-        case kRegAbuf + 1: audio_buffer_ = set_lo(audio_buffer_, v); return;
-        case kRegXbuf:
-            x_buffer_ = set_hi(x_buffer_, v);
-            raise_irq4();
-            return;
-        case kRegXbuf + 1: x_buffer_ = set_lo(x_buffer_, v); return;
+        case kRegCommand: command_ = v; return;
+        case kRegTime: time_ = set_half(time_, 16, v); return;
+        case kRegTime + 2: time_ = set_half(time_, 0, v); return;
+        case kRegFile: file_ = v; return;
+        case kRegChannel: channel_ = set_half(channel_, 16, v); return;
+        case kRegChannel + 2: channel_ = set_half(channel_, 0, v); return;
+        case kRegAudioChannel: audio_channel_ = v; return;
+        case kRegAbuf: audio_buffer_ = v; return;
+        case kRegXbuf: x_buffer_ = v; return;
         // The write completing DMA control runs Board::perform_cdic_dma.
-        case kRegDmaControl: dma_control_ = set_hi(dma_control_, v); return;
-        case kRegDmaControl + 1: dma_control_ = set_lo(dma_control_, v); return;
-        case kRegAudctl: audio_control_ = set_hi(audio_control_, v); return;
-        case kRegAudctl + 1:
-            audio_control_ = set_lo(audio_control_, v);
-            handle_audctl_write(); // fires once the low byte completes the word, as DBUF below
-            raise_irq4(); // kAudctlAbufIrq gates the line at once
-            return;
-        case kRegInterruptVector: interrupt_vector_ = set_hi(interrupt_vector_, v); return;
-        case kRegInterruptVector + 1: interrupt_vector_ = set_lo(interrupt_vector_, v); return;
-        case kRegDbuf: data_buffer_ = set_hi(data_buffer_, v); return;
-        case kRegDbuf + 1:
-            data_buffer_ = set_lo(data_buffer_, v);
-            handle_data_buffer_write(data_buffer_); // fires once the low byte completes the word
-            raise_irq4(); // so does kDbufActive
-            return;
+        case kRegDmaControl: dma_control_ = v; return;
+        case kRegAudctl: audio_control_ = v; return;
+        case kRegInterruptVector: interrupt_vector_ = v; return;
+        case kRegDbuf: data_buffer_ = v; return;
         default: return;
+    }
+}
+
+uint8_t Cdic::read_reg_byte(uint32_t offset) {
+    const uint32_t word = offset & ~1u;
+    if (word == kRegDmaControl) return 0; // write-only
+    const uint8_t v = byte_lane(register_word(word), offset);
+    switch (offset) {
+        case kRegAbuf:
+            audio_buffer_ &= ~kBufReady;
+            raise_irq4();
+            break;
+        case kRegXbuf:
+            x_buffer_ &= ~kBufReady;
+            raise_irq4();
+            break;
+        case kRegAudctl + 1: audio_control_ &= ~kAudctlStoppedOnEnd; break;
+        default: break;
+    }
+    return v;
+}
+
+void Cdic::write_reg_byte(uint32_t offset, uint8_t v) {
+    const uint32_t word = offset & ~1u;
+    set_register_word(word, set_byte_lane(register_word(word), offset, v));
+    switch (offset) {
+        case kRegAbuf:
+        case kRegXbuf: raise_irq4(); break;
+        case kRegAudctl + 1:
+            handle_audctl_write();
+            raise_irq4(); // kAudctlAbufIrq gates the line at once
+            break;
+        case kRegDbuf + 1:
+            handle_data_buffer_write(data_buffer_);
+            raise_irq4(); // so does kDbufActive
+            break;
+        default: break;
     }
 }
 
