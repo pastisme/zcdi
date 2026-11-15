@@ -7,9 +7,10 @@
 #include "fixtures/dvc_clear_fifo_fixture.h"
 #include "fixtures/dvc_mp2_fixture.h"
 #include "support/vmpeg_feed.h"
+#include "support/dvc_private.h"
 #include "support/vmpeg_regs.h"
 
-using zcdi_test::VmpegFeed;
+using namespace zcdi_test;
 
 namespace {
 constexpr uint16_t kFmvEii = 1u << 10;
@@ -49,9 +50,9 @@ TEST_CASE("program end on the FMV raises EII once, at the demuxer") {
     VmpegFeed feed;
     feed.push(stream.data(), stream.size());
     feed.flush();
-    CHECK((feed.device().fmv_isr() & kFmvEii) != 0);
-    CHECK(feed.device().consume_fmv_program_end());
-    CHECK_FALSE(feed.device().consume_fmv_program_end());
+    CHECK((fmv_isr(feed.device()) & kFmvEii) != 0);
+    CHECK(consume_fmv_program_end(feed.device()));
+    CHECK_FALSE(consume_fmv_program_end(feed.device()));
 }
 
 TEST_CASE("the FMA demuxer keeps the audio payload and reports program end") {

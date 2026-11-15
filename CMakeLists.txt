@@ -49,7 +49,11 @@ set(ZCDI_SOURCES
     src/chips/cdic/cdic.cpp
     src/chips/cdic/cdic_adpcm.cpp
     src/chips/mk48t08/mk48t08.cpp
-    src/chips/vmpeg/vmpeg.cpp
+    src/dvc/dvc.cpp
+    src/dvc/dvc_registers.cpp
+    src/dvc/frame_player.cpp
+    src/dvc/fma.cpp
+    src/dvc/ps_demux.cpp
     src/dvc/dvc_video.cpp
     src/dvc/dvc_audio.cpp
     src/dvc/mpeg2_state.cpp

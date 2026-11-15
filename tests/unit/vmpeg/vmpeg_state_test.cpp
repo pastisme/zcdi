@@ -3,24 +3,25 @@
 #include <cstdint>
 #include <vector>
 
-#include "chips/vmpeg/vmpeg.h"
+#include "dvc/dvc.h"
+#include "support/dvc_private.h"
 #include "support/state_roundtrip.h"
 #include "support/vmpeg_regs.h"
 
-using zcdi::chips::VmpegDevice;
+using zcdi::dvc::Dvc;
 using namespace zcdi_test;
 
 TEST_SUITE("vmpeg") {
 
 TEST_CASE("a restored VMPEG keeps its clocks and pending transfer bytes") {
-    VmpegDevice a;
+    Dvc a;
     write16(a, kFmvSyscmdOffset, 0x1000);  // Decoder On: the FMV demuxer runs
     a.tick_cycles(1'000'333);
     // A sequence header first: an elementary stream, kept until drained.
     for (uint16_t w : {0x0000, 0x01b3, 0x1234, 0x5678}) a.feed_dma_word(w);
 
     const std::vector<uint8_t> state = zcdi_test::save_state(a);
-    VmpegDevice b;
+    Dvc b;
     REQUIRE(zcdi_test::load_state(b, state));
     CHECK(zcdi_test::save_state(b) == state);
 
@@ -30,10 +31,10 @@ TEST_CASE("a restored VMPEG keeps its clocks and pending transfer bytes") {
         b.tick_cycles(777);
         CHECK(read32(b, kFmaDclkOffset) == read32(a, kFmaDclkOffset));
     }
-    const std::vector<uint8_t> es = a.drain_fmv_es_bytes();
+    const std::vector<uint8_t> es = drain_fmv_es_bytes(a);
     CHECK(es.size() == 8);
-    CHECK(b.drain_fmv_es_bytes() == es);
-    CHECK(b.drain_fma_es_bytes() == a.drain_fma_es_bytes());
+    CHECK(drain_fmv_es_bytes(b) == es);
+    CHECK(drain_fma_es_bytes(b) == drain_fma_es_bytes(a));
     CHECK(zcdi_test::save_state(b) == zcdi_test::save_state(a));
 }
 
@@ -43,32 +44,32 @@ TEST_SUITE("vmpeg") {
 
 // SYS_STS (0xE0405E): input FIFO full above 62000 bytes.
 TEST_CASE("SYS_STS reports the video input FIFO full above 62000 bytes") {
-    VmpegDevice v;
+    Dvc v;
     CHECK(read16(v, kFmvSysStsOffset) == 0x2000);
-    v.set_decoder_input_bytes(62000);
+    set_decoder_input_bytes(v, 62000);
     CHECK(read16(v, kFmvSysStsOffset) == 0x2000);
-    v.set_decoder_input_bytes(62001);
+    set_decoder_input_bytes(v, 62001);
     CHECK(read16(v, kFmvSysStsOffset) == 0);
 }
 
 TEST_CASE("demuxed bytes not yet handed to the decoder count toward full") {
-    VmpegDevice v;
+    Dvc v;
     write16(v, kFmvSyscmdOffset, 0x1000);
     for (uint16_t w : {0x0000, 0x01b3, 0x1234}) v.feed_dma_word(w);
-    v.set_decoder_input_bytes(62000);
+    set_decoder_input_bytes(v, 62000);
     CHECK(read16(v, kFmvSysStsOffset) == 0);
 }
 
 TEST_CASE("Clear FIFO empties the input FIFO") {
-    VmpegDevice v;
-    v.set_decoder_input_bytes(70000);
+    Dvc v;
+    set_decoder_input_bytes(v, 70000);
     write16(v, kFmvSyscmdOffset, 0x0100);
     CHECK(read16(v, kFmvSysStsOffset) == 0x2000);
 }
 
 // PES DTS -> DTS FIFO (PICS_IN_FIFO) -> display.
 TEST_CASE("the demuxed DTS drives PICS_IN_FIFO and the display start") {
-    VmpegDevice v;
+    Dvc v;
     auto timestamp = [](uint8_t prefix, int64_t t) {
         return std::vector<uint8_t>{
             uint8_t(prefix << 4 | ((t >> 30) & 7) << 1 | 1), uint8_t(t >> 22),
@@ -93,23 +94,23 @@ TEST_CASE("the demuxed DTS drives PICS_IN_FIFO and the display start") {
     CHECK(read16(v, kFmvPicsInFifoOffset) == 2);
 
     write16(v, kFmvSysScrOffset, 0x0004);  // SYSSCR: synchronous playback
-    CHECK_FALSE(v.video_display_enabled());
+    CHECK_FALSE(video_display_enabled(v));
     write16(v, kFmvSyscmdOffset, 0x0008);  // Play
     v.tick_cycles(2'000'000);
-    CHECK_FALSE(v.video_display_enabled());  // dclk far from the DTS
+    CHECK_FALSE(video_display_enabled(v));  // dclk far from the DTS
     write16(v, kFmvGenSyscrOffset, 703);  // GEN_SYSCR = dclk bits 20:6
-    CHECK(v.video_display_enabled());
+    CHECK(video_display_enabled(v));
 
     CHECK(read16(v, kFmvPicsInFifoOffset) == 1);  // once playing, one less than the dts_fifo
-    v.note_picture_displayed();
+    note_picture_displayed(v);
     CHECK(read16(v, kFmvPicsInFifoOffset) == 1);  // but not below 1
-    v.note_picture_displayed();
+    note_picture_displayed(v);
     CHECK(read16(v, kFmvPicsInFifoOffset) == 0);
 
     write16(v, kFmvSyscmdOffset, 0x0100);  // Clear FIFO
     CHECK(read16(v, kFmvPicsInFifoOffset) == 0);
     CHECK(read16(v, kFmvDtsOffset) == 0);  // the demuxer reset clears the DTS
-    CHECK_FALSE(v.video_display_enabled());
+    CHECK_FALSE(video_display_enabled(v));
 }
 
 }  // TEST_SUITE
@@ -118,13 +119,13 @@ TEST_SUITE("vmpeg") {
 
 // Counted until Play, never decremented.
 TEST_CASE("before Play PICS_IN_FIFO counts every picture received since Decoder On") {
-    VmpegDevice v;
+    Dvc v;
     write16(v, kFmvSyscmdOffset, 0x1000);  // Decoder On
     const uint8_t sequence_then_pictures[] = {0, 0, 1, 0xb3, 0x16, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0};
     for (size_t i = 0; i < sizeof(sequence_then_pictures); i += 2)
         v.feed_dma_word(uint16_t(sequence_then_pictures[i] << 8 | sequence_then_pictures[i + 1]));
     CHECK(read16(v, kFmvPicsInFifoOffset) == 2);
-    v.note_picture_displayed();
+    note_picture_displayed(v);
     CHECK(read16(v, kFmvPicsInFifoOffset) == 2);
     write16(v, kFmvSyscmdOffset, 0x0008);  // Play
     CHECK(read16(v, kFmvPicsInFifoOffset) == 1);

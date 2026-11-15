@@ -3,10 +3,11 @@
 
 #include <cstdint>
 
-#include "chips/vmpeg/vmpeg.h"
+#include "dvc/dvc.h"
+#include "support/dvc_private.h"
 #include "support/vmpeg_regs.h"
 
-using zcdi::chips::VmpegDevice;
+using zcdi::dvc::Dvc;
 using namespace zcdi_test;
 
 namespace {
@@ -17,38 +18,38 @@ constexpr uint32_t kTimecode = (2u << 22) | (3u << 16) | (0u << 6) | 1u;
 TEST_SUITE("vmpeg") {
 
 TEST_CASE("time codes read back once the decoder is on") {
-    VmpegDevice v;
-    v.set_video_decoder_timecode(kTimecode);
-    v.set_video_display_timecode(kTimecode);
+    Dvc v;
+    set_video_decoder_timecode(v, kTimecode);
+    set_video_display_timecode(v, kTimecode);
     CHECK(read32(v, kFmvDecoderTimecodeOffset) == 0);
     CHECK(read32(v, kFmvDisplayTimecodeOffset) == 0);
 
     write16(v, kFmvSyscmdOffset, 0x1000);  // Decoder On
-    v.set_video_decoder_timecode(kTimecode);
+    set_video_decoder_timecode(v, kTimecode);
     CHECK(read32(v, kFmvDecoderTimecodeOffset) == kTimecode);
     CHECK(read32(v, kFmvDisplayTimecodeOffset) == 0);
-    v.set_video_display_timecode(kTimecode);
+    set_video_display_timecode(v, kTimecode);
     CHECK(read32(v, kFmvDisplayTimecodeOffset) == kTimecode);
 }
 
 TEST_CASE("Clear FIFO and Decoder Off clear the time codes") {
-    VmpegDevice v;
+    Dvc v;
     write16(v, kFmvSyscmdOffset, 0x1000);
-    v.set_video_decoder_timecode(kTimecode);
-    v.set_video_display_timecode(kTimecode);
+    set_video_decoder_timecode(v, kTimecode);
+    set_video_display_timecode(v, kTimecode);
 
     SUBCASE("Clear FIFO leaves the decoder on") {
         write16(v, kFmvSyscmdOffset, 0x0100);
         CHECK(read32(v, kFmvDecoderTimecodeOffset) == 0);
         CHECK(read32(v, kFmvDisplayTimecodeOffset) == 0);
-        v.set_video_display_timecode(kTimecode);
+        set_video_display_timecode(v, kTimecode);
         CHECK(read32(v, kFmvDisplayTimecodeOffset) == kTimecode);
     }
     SUBCASE("Decoder Off keeps them at 0") {
         write16(v, kFmvSyscmdOffset, 0x2000);
         CHECK(read32(v, kFmvDecoderTimecodeOffset) == 0);
         CHECK(read32(v, kFmvDisplayTimecodeOffset) == 0);
-        v.set_video_display_timecode(kTimecode);
+        set_video_display_timecode(v, kTimecode);
         CHECK(read32(v, kFmvDisplayTimecodeOffset) == 0);
     }
 }

@@ -1,7 +1,6 @@
 #include "core/bus.h"
 
 #include <algorithm>
-#include <cmath>
 #include <cstring>
 #include <utility>
 
@@ -82,6 +81,7 @@ void Bus::load_dvc(const std::span<const std::byte>& content) {
     const auto* p = reinterpret_cast<const uint8_t*>(content.data());
     dvc_rom_.assign(p, p + std::min(content.size(), std::size_t{kDvcCartRomSize}));
     dvc_rom_crc_ = state_crc32(dvc_rom_);
+    dvc_.set_cartridge_present(dvc_cart_present());
 }
 
 void Bus::prepare_reset_vectors() {
@@ -93,72 +93,22 @@ void Bus::prepare_reset_vectors() {
 std::string Bus::drain_uart_output() { return scc_.drain_uart_output(); }
 
 void Bus::dvc_tick_frame(double refresh_rate_hz) {
-    // Decoder Off also drops the shown picture so it can't flash up at the next Show.
-    if (vmpeg_.consume_decoder_off()) {
-        dvc_video_.decoder_off();
-        mcd212_.set_dvc_frame(nullptr, 0, 0);
-    }
-    // Before feeding, so a cut-off picture isn't glued onto the next clip.
-    if (vmpeg_.consume_clear_fifo()) {
-        dvc_video_.clear_fifo();
-    }
-    // Demuxed by VMPEG from the channel-1 DMA and XFER writes.
-    std::vector<dvc::DvcVideo::ArrivalMark> arrivals;
-    for (const auto& a : vmpeg_.drain_fmv_es_arrivals())
-        arrivals.push_back({a.offset, a.time});
-    dvc_video_.feed(vmpeg_.drain_fmv_es_bytes(), arrivals);
-    if (vmpeg_.consume_fmv_program_end()) dvc_video_.note_program_end();
-    const uint32_t now = vmpeg_.free_running_dclk();
-    dvc_video_.decode_frame(now);
-    for (int n = dvc_video_.consume_discarded_pictures(); n > 0; --n) {
-        vmpeg_.note_picture_discarded();
-    }
-    if (dvc_video_.consume_picture_decoded()) {
-        vmpeg_.set_video_decoder_timecode(dvc_video_.last_decoded_timecode());
-        vmpeg_.set_video_frame_decoded(dvc_video_.last_decoded_picture_rate_code());
-    }
-    vmpeg_.set_decoder_input_bytes(dvc_video_.input_bytes());
-
-    // The frame player decides presentation.
-    const uint32_t field_clocks = uint32_t(std::lround(30000000.0 / refresh_rate_hz));
-    field_samples_ = int32_t(std::lround(44100.0 / refresh_rate_hz));
-    // One vsync edge per field: RegsUpd is taken there, before the picture is selected.
-    vmpeg_.notify_vsync();
-    const auto step = vmpeg_.frame_player_field(field_clocks, dvc_video_.queue_depth());
-    // PIC, GOP and SEQ belong to the display process.
-    if (step.show && dvc_video_.present_next_frame()) {
-        vmpeg_.note_picture_displayed();
-        // The latch freed a slot: a waiting push_frame() goes ahead before line 11.
-        dvc_video_.resume_push(now);
-        vmpeg_.check_buffer_underflow(dvc_video_.queue_depth(), dvc_video_.decoder_held_pictures());
-        vmpeg_.set_video_frame_ready(dvc_video_.width(), dvc_video_.height());
-        vmpeg_.set_video_display_timecode(dvc_video_.presented_timecode());
-        vmpeg_.set_video_display_status(dvc_video_.presented_video_status());
-        vmpeg_.set_video_display_picture_rate(dvc_video_.presented_picture_rate_code());
-        if (dvc_video_.presented_starts_gop()) vmpeg_.set_video_gop_start();
-        if (dvc_video_.presented_starts_sequence()) vmpeg_.set_video_sequence_start();
-    }
-    if (dvc_video_.has_next_picture()) {
-        vmpeg_.set_next_picture(dvc_video_.next_width(), dvc_video_.next_height(), dvc_video_.next_picture_rate_code());
-    }
-    // No picture of its own, so checked every field.
-    if (dvc_video_.consume_sequence_end()) vmpeg_.set_video_sequence_end();
-    if (dvc_video_.consume_last_picture_shown()) vmpeg_.set_video_last_picture();
+    if (dvc_.tick_field(refresh_rate_hz)) mcd212_.set_dvc_frame(nullptr, 0, 0);
 }
 
 int Bus::video_begin_field(int lines) { return mcd212_.begin_field(lines); }
 
 void Bus::video_end_of_line(int line) {
     mcd212_.end_of_line(line, plane0_.data(), plane1_.data(), plane0_.size());
-    vmpeg_.notify_line(line, mcd212_.first_active_line(), mcd212_.active_height());
+    dvc_.end_of_line(line, mcd212_.first_active_line(), mcd212_.active_height());
 }
 
 void Bus::video_end_field() {
-    if (dvc_video_.has_frame()) {
-        mcd212_.set_dvc_frame(dvc_video_.frame_rgba(), dvc_video_.width(), dvc_video_.height());
+    if (dvc_.has_frame()) {
+        mcd212_.set_dvc_frame(dvc_.frame_rgba(), dvc_.width(), dvc_.height());
     }
     mcd212_.set_dvc_attached(dvc_cart_present());
-    chips::VmpegDevice::DisplayWindow w = vmpeg_.display_window();
+    const dvc::Dvc::DisplayWindow w = dvc_.display_window();
     mcd212_.set_dvc_window(w.scrpos_x, w.scrpos_y, w.decwin_w, w.decwin_h, w.decoff_x, w.decoff_y, w.show,
                            w.vcd_pixel_clock);
     mcd212_.end_field();
@@ -181,14 +131,12 @@ void Bus::state_io(T& archive) {
     socket_state_io(archive, Socket::kFront);
     socket_state_io(archive, Socket::kBack);
     cdic_.state_io(archive);
-    vmpeg_.state_io(archive);
+    dvc_.state_io(archive);
     nvram_.state_io(archive);
-    dvc_video_.state_io(archive);
-    dvc_audio_.state_io(archive);
     if constexpr (T::kLoading) {
         sync_tray();
         // The load replaced the picture the overlay pointed into.
-        mcd212_.rebind_dvc_frame(dvc_video_.frame_rgba(), size_t(dvc_video_.width()) * size_t(dvc_video_.height()) * 4);
+        mcd212_.rebind_dvc_frame(dvc_.frame_rgba(), size_t(dvc_.width()) * size_t(dvc_.height()) * 4);
     }
 }
 ZCDI_STATE_IO_INSTANTIATE(Bus);
@@ -255,7 +203,7 @@ void Bus::periph_tick(int cpu_cycles) {
         if (byte >= 0) scc_.uart_receive(uint8_t(byte & 0x7f));
     }
     cdic_.tick_cycles(cpu_cycles);
-    vmpeg_.tick_cycles(cpu_cycles);
+    dvc_.tick_cycles(cpu_cycles);
     nvram_.tick_cycles(cpu_cycles);
     slave_.tick_cycles(cpu_cycles);
 }
@@ -309,36 +257,10 @@ void Bus::socket_state_io(T& archive, Socket s) {
 }
 
 AudioStreams Bus::drain_audio() {
-    std::vector<int16_t> cdic_pcm = cdic_.drain_audio();
-    slave_.attenuate(cdic_pcm);
-    // Demuxed by VMPEG from the channel-1 DMA; all of it arrived after any FMA stop.
-    std::vector<uint8_t> dvc_bytes = vmpeg_.drain_fma_es_bytes();
-    if (vmpeg_.consume_audio_reset()) {
-        dvc_audio_.reset();
-    }
-
-    dvc_audio_.feed(dvc_bytes);
-    // PS audio waits until the FMA playback timer reaches its first PTS.
-    const bool hold = vmpeg_.audio_start_pending();
-    std::vector<int16_t> dvc_pcm = hold ? std::vector<int16_t>{} : dvc_audio_.decode_all();
-    if (!dvc_pcm.empty()) {
-        if (!vmpeg_.audio_dsp_enabled()) vmpeg_.set_audio_decoding_started();
-        vmpeg_.set_audio_frame_decoded(dvc_audio_.last_frame_header());
-    }
-    // FMA underflow, once a DMA has fed the FMA.
-    if (dvc_cart_present() && fma_dma_seen_) vmpeg_.audio_field(int32_t(dvc_pcm.size() / 2), field_samples_);
     AudioStreams out;
-    out.cdic = std::move(cdic_pcm);
-    // Cartridge DAC gain matrix, Q0.8 (256 = unity). The gains power up at 0 and
-    // apply as each is written: muted until the driver programs them.
-    const int l2l = vmpeg_.mpeg_volume_l2l(), r2r = vmpeg_.mpeg_volume_r2r();
-    const int l2r = vmpeg_.mpeg_volume_l2r(), r2l = vmpeg_.mpeg_volume_r2l();
-    out.dvc.assign(dvc_pcm.size() & ~std::size_t(1), 0);
-    for (std::size_t i = 0; i + 1 < dvc_pcm.size(); i += 2) {
-        int l = dvc_pcm[i], r = dvc_pcm[i + 1];
-        out.dvc[i] = clamp16((l * l2l + r * r2l) >> 8);
-        out.dvc[i + 1] = clamp16((l * l2r + r * r2r) >> 8);
-    }
+    out.cdic = cdic_.drain_audio();
+    slave_.attenuate(out.cdic);
+    out.dvc = dvc_.drain_audio();
     return out;
 }
 
@@ -348,7 +270,7 @@ int Bus::update_interrupts() {
 
     // SR latch: the first requester owns in4 until its request drops.
     bool cdic_req = cdic_.irq4_asserted();
-    bool vmpeg_req = vmpeg_.irq_asserted();
+    bool vmpeg_req = dvc_.irq_asserted();
     switch (in4_owner_) {
         case In4Owner::kCdic:
             if (!cdic_req) in4_owner_ = In4Owner::kIdle;
@@ -377,7 +299,7 @@ int Bus::interrupt_ack(int level) {
     // Only the external in4 pin goes to its owner; an internal level-4
     // source (e.g. DMA COC at IPL 4) takes the SCC's own iack path.
     if (level == 4 && scc_.in4_asserted()) {
-        return (in4_owner_ == In4Owner::kVmpeg) ? vmpeg_.iack_vector() : cdic_.iack_vector();
+        return (in4_owner_ == In4Owner::kVmpeg) ? dvc_.iack_vector() : cdic_.iack_vector();
     }
     return scc_.iack(level);
 }
@@ -411,18 +333,16 @@ void Bus::perform_vmpeg_dma() {
     bool device_to_memory = (ocr & 0x80) != 0; // OCR_D
 
     if (!device_to_memory) {
-        bool for_fma = vmpeg_.dma_for_fma(); // read before complete_dma() clears it below
         for (uint32_t i = 0; i < words; ++i) {
             uint32_t mem_off = mem_addr + i * 2;
             uint16_t word = (uint16_t(read8(mem_off)) << 8) | read8(mem_off + 1);
-            vmpeg_.feed_dma_word(word);
+            dvc_.feed_dma_word(word);
         }
-        if (words > 0 && for_fma) fma_dma_seen_ = true;
     }
     // VMPEG is wired only as a DMA sink; the counters still advance.
     scc_.advance_dma_ch1_memory_address_counter(words * 2);
     scc_.complete_dma_ch1_burst(words);
-    vmpeg_.complete_dma();
+    dvc_.complete_dma(device_to_memory ? 0 : words);
 }
 
 bool Bus::plain_byte(uint32_t a, uint8_t& v) const {
@@ -462,7 +382,7 @@ bool Bus::plain_byte(uint32_t a, uint8_t& v) const {
         return true;
     }
     if (in_range(a, kDvcDecodeRamBase, kDvcDecodeRamSize)) {
-        v = vmpeg_.mpeg_ram_enabled() ? dvc_decode_ram_[a - kDvcDecodeRamBase] : 0;
+        v = dvc_.mpeg_ram_enabled() ? dvc_decode_ram_[a - kDvcDecodeRamBase] : 0;
         return true;
     }
     if (in_range(a, kPlayCdiOverlayBase, kPlayCdiOverlayCodeSize) && playcdi_overlay_active()) {
@@ -484,7 +404,7 @@ uint8_t Bus::read8(uint32_t a) {
     }
     if (in_range(a, kSlaveNvramGapBase, kSlaveNvramGapSize)) return 0xff;
     if (a >= 0x80000000u) return scc_.read_byte(a);
-    if (in_range(a, kDvcRegBase, kDvcRegSize)) return vmpeg_.read_byte(a - kDvcRegBase);
+    if (in_range(a, kDvcRegBase, kDvcRegSize)) return dvc_.read_byte(a - kDvcRegBase);
     return 0;
 }
 uint16_t Bus::read16(uint32_t a) { return static_cast<uint16_t>((read8(a) << 8) | read8(a + 1)); }
@@ -545,13 +465,13 @@ void Bus::write8(uint32_t a, uint8_t v) {
     }
     if (in_range(a, kDvcDecodeRamBase, kDvcDecodeRamSize)) {
         // Dropped until the firmware enables it.
-        if (vmpeg_.mpeg_ram_enabled()) dvc_decode_ram_[a - kDvcDecodeRamBase] = v;
+        if (dvc_.mpeg_ram_enabled()) dvc_decode_ram_[a - kDvcDecodeRamBase] = v;
         return;
     }
     if (in_range(a, kDvcRegBase, kDvcRegSize)) {
-        vmpeg_.write_byte(a - kDvcRegBase, v);
+        dvc_.write_byte(a - kDvcRegBase, v);
         // The one place channel 1 starts: requests change only on these writes.
-        if (vmpeg_.dma_active()) perform_vmpeg_dma();
+        if (dvc_.dma_active()) perform_vmpeg_dma();
         return;
     }
 }
@@ -581,7 +501,7 @@ bool Bus::is_decoded(uint32_t a) const {
     if (a >= 0x80000000u) return true;
     if (in_range(a, kDvcCartRamBase, kDvcCartRamSize)) return dvc_cart_present();
     if (in_range(a, kDvcCartRomBase, kDvcCartRomSize)) return true;
-    if (in_range(a, kDvcDecodeRamBase, kDvcDecodeRamSize)) return vmpeg_.mpeg_ram_enabled();
+    if (in_range(a, kDvcDecodeRamBase, kDvcDecodeRamSize)) return dvc_.mpeg_ram_enabled();
     if (in_range(a, kDvcRegBase, kDvcRegSize)) return true;
     // The whole window, not just the overlay's bytes.
     if (in_range(a, kPlayCdiOverlayBase, 0x10000) && playcdi_overlay_active()) return true;

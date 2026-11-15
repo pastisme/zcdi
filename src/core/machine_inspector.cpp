@@ -68,9 +68,7 @@ const chips::SlaveHle& MachineInspector::slave() const { return machine_.bus_.sl
 
 const chips::Cdic& MachineInspector::cdic() const { return machine_.bus_.cdic_; }
 
-const chips::VmpegDevice& MachineInspector::vmpeg() const { return machine_.bus_.vmpeg_; }
-
-const dvc::DvcVideo& MachineInspector::dvc_video() const { return machine_.bus_.dvc_video_; }
+const dvc::Dvc& MachineInspector::dvc() const { return machine_.bus_.dvc_; }
 
 int MachineInspector::line() const { return machine_.line_; }
 

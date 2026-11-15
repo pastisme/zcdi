@@ -3,20 +3,21 @@
 
 #include <cstdint>
 
-#include "chips/vmpeg/vmpeg.h"
+#include "dvc/dvc.h"
+#include "support/dvc_private.h"
 #include "support/vmpeg_regs.h"
 
-using zcdi::chips::VmpegDevice;
+using zcdi::dvc::Dvc;
 using namespace zcdi_test;
 
 namespace {
 
-void declare_size(VmpegDevice& v, uint16_t w, uint16_t h) {
+void declare_size(Dvc& v, uint16_t w, uint16_t h) {
     write16(v, kFmvImageWidthOffset, w);
     write16(v, kFmvImageHeightOffset, h);
 }
 
-bool image_size_is(VmpegDevice& v, uint16_t w, uint16_t h) {
+bool image_size_is(Dvc& v, uint16_t w, uint16_t h) {
     return read16(v, kFmvImageWidthOffset) == w && read16(v, kFmvImageHeightOffset) == h;
 }
 
@@ -25,36 +26,36 @@ bool image_size_is(VmpegDevice& v, uint16_t w, uint16_t h) {
 TEST_SUITE("vmpeg") {
 
 TEST_CASE("IMGSZ keeps fmvdrv's size until Play") {
-    VmpegDevice v;
+    Dvc v;
     write16(v, kFmvSyscmdOffset, 0x1000);  // Decoder On
     declare_size(v, 352, 224);
-    v.set_next_picture(368, 272, 3);
+    set_next_picture(v, 368, 272, 3);
     CHECK(image_size_is(v, 352, 224));
     write16(v, kFmvSyscmdOffset, 0x0008);  // Play
     CHECK(image_size_is(v, 352, 224));     // until the next field reports it
-    v.set_next_picture(368, 272, 3);
+    set_next_picture(v, 368, 272, 3);
     CHECK(image_size_is(v, 368, 272));
 }
 
 TEST_CASE("once playing IMGSZ follows the next picture") {
-    VmpegDevice v;
+    Dvc v;
     write16(v, kFmvSyscmdOffset, 0x1000);
     write16(v, kFmvSyscmdOffset, 0x0008);
-    v.set_next_picture(368, 272, 3);
+    set_next_picture(v, 368, 272, 3);
     CHECK(image_size_is(v, 368, 272));
-    v.set_next_picture(352, 240, 3);
+    set_next_picture(v, 352, 240, 3);
     CHECK(image_size_is(v, 352, 240));
 }
 
 TEST_CASE("Stop and Decoder Off hold IMGSZ again") {
     for (uint16_t cmd : {uint16_t(0x0080), uint16_t(0x2000)}) {
         CAPTURE(cmd);
-        VmpegDevice v;
+        Dvc v;
         write16(v, kFmvSyscmdOffset, 0x1000);
         write16(v, kFmvSyscmdOffset, 0x0008);
         write16(v, kFmvSyscmdOffset, cmd);
         declare_size(v, 352, 224);
-        v.set_next_picture(368, 272, 3);
+        set_next_picture(v, 368, 272, 3);
         CHECK(image_size_is(v, 352, 224));
     }
 }

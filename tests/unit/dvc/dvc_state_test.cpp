@@ -33,7 +33,7 @@ struct Feeder {
     }
 };
 
-// One field the way Bus drives it: feed, decode, present.
+// One field the way Dvc drives it: feed, decode, present.
 void field(DvcVideo& v, Feeder& f) {
     std::vector<uint8_t> chunk = f.next();
     if (!chunk.empty()) v.feed(chunk);

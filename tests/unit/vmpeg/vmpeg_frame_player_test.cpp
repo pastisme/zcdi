@@ -4,43 +4,44 @@
 #include <cstdint>
 #include <vector>
 
-#include "chips/vmpeg/vmpeg.h"
-#include "support/vmpeg_private.h"
+#include "dvc/vmpeg.h"
+#include "support/dvc_private.h"
 #include "support/vmpeg_regs.h"
 
-using zcdi::chips::VmpegDevice;
+using zcdi::dvc::Dvc;
 using zcdi_test::kFmvGenDecCmdOffset;
 using zcdi_test::kFmvSyscmdOffset;
 using zcdi_test::kFmvSysScrOffset;
 using zcdi_test::write16;
+using namespace zcdi_test;
 
 namespace {
 constexpr uint32_t kPalFieldClocks = 600000;       // 30 MHz / 50 Hz
 constexpr int kRate25 = 3;
 constexpr int kRate2997 = 4;
 
-void start_playback(VmpegDevice& v, int rate_code) {
+void start_playback(Dvc& v, int rate_code) {
     zcdi_test::set_playback_active(v, true);
-    v.set_video_frame_decoded(rate_code);
+    set_video_frame_decoded(v, rate_code);
 }
 
 // Fields, out of `fields`, on which a picture is shown, with `ready`
 // pictures always waiting.
-std::vector<int> shown_fields(VmpegDevice& v, int fields, size_t ready = 8) {
+std::vector<int> shown_fields(Dvc& v, int fields, size_t ready = 8) {
     std::vector<int> shown;
     for (int f = 1; f <= fields; ++f) {
-        if (v.frame_player_field(kPalFieldClocks, ready).show) shown.push_back(f);
+        if (frame_player_field(v, kPalFieldClocks, ready)) shown.push_back(f);
     }
     return shown;
 }
 
-// The desync measured for each shown picture, popping it from the dts_fifo as Bus does.
-std::vector<int> shown_desyncs(VmpegDevice& v, size_t count) {
+// The desync measured for each shown picture, popping it from the dts_fifo as Dvc does.
+std::vector<int> shown_desyncs(Dvc& v, size_t count) {
     std::vector<int> out;
     for (int f = 0; f < 100 && out.size() < count; ++f) {
-        if (!v.frame_player_field(kPalFieldClocks, 8).show) continue;
-        out.push_back(v.state().player_desync_q_);
-        v.note_picture_displayed();
+        if (!frame_player_field(v, kPalFieldClocks, 8)) continue;
+        out.push_back(v.fmv_state().player_desync_q_);
+        note_picture_displayed(v);
     }
     return out;
 }
@@ -54,7 +55,7 @@ int64_t dts_at_desync(uint32_t dclk, int desync) {
 TEST_SUITE("vmpeg") {
 
 TEST_CASE("a 25 Hz stream shows on every other PAL field") {
-    VmpegDevice v;
+    Dvc v;
     start_playback(v, kRate25);
     std::vector<int> shown = shown_fields(v, 20);
     REQUIRE(shown.size() == 10u);
@@ -62,7 +63,7 @@ TEST_CASE("a 25 Hz stream shows on every other PAL field") {
 }
 
 TEST_CASE("a 29.97 Hz stream keeps its rate on 50 Hz fields") {
-    VmpegDevice v;
+    Dvc v;
     start_playback(v, kRate2997);
     // 1000 fields of 600000 clocks over periods of 1001001 clocks.
     std::vector<int> shown = shown_fields(v, 1000);
@@ -71,8 +72,8 @@ TEST_CASE("a 29.97 Hz stream keeps its rate on 50 Hz fields") {
 }
 
 TEST_CASE("nothing is shown while playback is stopped or no picture waits") {
-    VmpegDevice v;
-    v.set_video_frame_decoded(kRate25);
+    Dvc v;
+    set_video_frame_decoded(v, kRate25);
     CHECK(shown_fields(v, 10).empty());  // playback not active
 
     zcdi_test::set_playback_active(v, true);
@@ -81,11 +82,11 @@ TEST_CASE("nothing is shown while playback is stopped or no picture waits") {
 
 TEST_CASE("synchronous mode shortens the period while the clock leads the DTS") {
     // Asynchronous reference: 150 pictures in 300 fields.
-    VmpegDevice ref;
+    Dvc ref;
     start_playback(ref, kRate25);
     REQUIRE(shown_fields(ref, 300).size() == 150u);
 
-    VmpegDevice v;
+    Dvc v;
     write16(v, kFmvSysScrOffset, 0x0004);  // synchronous
     const uint32_t dclk = 0x100000;
     zcdi_test::set_fmv_dclk(v, dclk);
@@ -99,8 +100,8 @@ TEST_CASE("synchronous mode shortens the period while the clock leads the DTS") 
 }
 
 TEST_CASE("Step shows one picture while playback is stopped") {
-    VmpegDevice v;
-    v.set_video_frame_decoded(kRate25);
+    Dvc v;
+    set_video_frame_decoded(v, kRate25);
     write16(v, kFmvSyscmdOffset, 0x0040);  // Step
     // Armed at the first vsync, shown at the second.
     CHECK(shown_fields(v, 10) == std::vector<int>{2});
@@ -115,14 +116,14 @@ TEST_CASE("Step shows one picture while playback is stopped") {
 }
 
 TEST_CASE("slow motion multiplies the picture period") {
-    VmpegDevice v;
+    Dvc v;
     write16(v, kFmvSyscmdOffset, 0x0008 | 1);  // Play at half speed
     start_playback(v, kRate25);
     CHECK(shown_fields(v, 40).size() == 10u);  // every 4th PAL field
 }
 
 TEST_CASE("far behind the SCR pictures come at the shortest period and none is dropped") {
-    VmpegDevice v;
+    Dvc v;
     start_playback(v, kRate25);
     const int64_t scr = 1000000;
     zcdi_test::set_demux_scr(v, scr);
@@ -134,7 +135,7 @@ TEST_CASE("far behind the SCR pictures come at the shortest period and none is d
 TEST_CASE("the period stays within 1/8 of the picture period") {
     for (int desync : {200, -200}) {
         CAPTURE(desync);
-        VmpegDevice v;
+        Dvc v;
         write16(v, kFmvSysScrOffset, 0x0004);
         const uint32_t dclk = 0x100000;
         zcdi_test::set_fmv_dclk(v, dclk);
@@ -150,7 +151,7 @@ TEST_CASE("the period stays within 1/8 of the picture period") {
 }
 
 TEST_CASE("a measured desync holds for 3 pictures without a timestamp") {
-    VmpegDevice v;
+    Dvc v;
     write16(v, kFmvSysScrOffset, 0x0004);
     const uint32_t dclk = 0x100000;
     zcdi_test::set_fmv_dclk(v, dclk);
@@ -166,7 +167,7 @@ TEST_CASE("a measured desync holds for 3 pictures without a timestamp") {
 
 TEST_CASE("a picture without a timestamp syncs to the last DTS plus a picture period") {
     auto second_desync = [](bool second_has_dts) {
-        VmpegDevice v;
+        Dvc v;
         write16(v, kFmvSyscmdOffset, 0x1000);  // Decoder On: the 90 kHz period counts
         write16(v, kFmvSysScrOffset, 0x0004);
         const uint32_t dclk = 0x100000;
@@ -182,7 +183,7 @@ TEST_CASE("a picture without a timestamp syncs to the last DTS plus a picture pe
 }
 
 TEST_CASE("slow motion doesn't sync to the DTS") {
-    VmpegDevice v;
+    Dvc v;
     write16(v, kFmvSysScrOffset, 0x0004);
     write16(v, kFmvSyscmdOffset, 0x0008 | 1);  // Play at half speed
     const uint32_t dclk = 0x100000;

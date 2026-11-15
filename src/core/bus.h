@@ -12,11 +12,9 @@
 #include "chips/mk48t08/mk48t08.h"
 #include "chips/scc68070/scc68070.h"
 #include "chips/slave/slave.h"
-#include "chips/vmpeg/vmpeg.h"
 #include "core/pointing_device.h"
 #include "disc/disc.h"
-#include "dvc/dvc_audio.h"
-#include "dvc/dvc_video.h"
+#include "dvc/dvc.h"
 
 namespace zcdi {
 
@@ -33,9 +31,6 @@ struct BusSaveState {
     // Which device's request holds IN4 (an SR latch on the board).
     enum class In4Owner { kIdle, kCdic, kVmpeg } in4_owner_ = In4Owner::kIdle;
     bool last_reset_by_slave_ = false;
-
-    // FMA underflow is only reported once a DMA has fed the FMA.
-    bool fma_dma_seen_ = false;
 
     bool state_valid() const {
         return in4_owner_ == In4Owner::kIdle || in4_owner_ == In4Owner::kCdic || in4_owner_ == In4Owner::kVmpeg;
@@ -118,7 +113,7 @@ public:
     // Set once at construction.
     void set_video_standard(VideoStandard standard) {
         slave_.set_video_standard(standard);
-        vmpeg_.set_video_standard(standard);
+        dvc_.set_video_standard(standard);
     }
 
     bool consume_slave_reset_request() { return slave_.consume_reset_request(); }
@@ -195,14 +190,13 @@ private:
     std::vector<uint8_t> dvc_ram_; // 0xd00000-0xdfffff: DVC cartridge RAM (cartridge only)
     std::vector<uint8_t> dvc_rom_; // 0xe40000-0xe7ffff: DVC cartridge ROM (vmpega.rom)
     bool dvc_cart_present() const { return !dvc_rom_.empty(); }
-    // 0xe80000-0xefffff, hidden until vmpeg_.mpeg_ram_enabled().
+    // 0xe80000-0xefffff, hidden until dvc_.mpeg_ram_enabled().
     std::vector<uint8_t> dvc_decode_ram_;
     chips::Mk48t08 nvram_; // 0x320000-0x323fff: MK48T08 timekeeper
     std::vector<uint8_t> rom_; // 0x400000-0x47ffff: BIOS ROM
     // Save-state fingerprints.
     uint32_t rom_crc_ = 0;
     uint32_t dvc_rom_crc_ = 0;
-    int32_t field_samples_ = 882; // 44.1 kHz samples per field, set by dvc_tick_frame
 
     void apply_interrupts_now();
 
@@ -220,9 +214,7 @@ private:
     template <class T>
     void socket_state_io(T& archive, Socket s);
     chips::Cdic cdic_; // 0x300000-0x303fff
-    chips::VmpegDevice vmpeg_; // 0xe00000-0xe3ffff, FMA/FMV registers
-    dvc::DvcVideo dvc_video_;
-    dvc::DvcAudio dvc_audio_;
+    dvc::Dvc dvc_; // 0xe00000-0xe3ffff registers
 };
 
 } // namespace zcdi

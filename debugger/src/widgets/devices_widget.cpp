@@ -3,9 +3,9 @@
 #include "chips/cdic/cdic.h"
 #include "chips/scc68070/scc68070.h"
 #include "chips/slave/slave.h"
-#include "chips/vmpeg/vmpeg.h"
 #include "core/machine_inspector.h"
 #include "disc/sector.h"
+#include "dvc/dvc.h"
 #include "dvc/dvc_video.h"
 #include "imgui/imgui.h"
 
@@ -88,9 +88,11 @@ void draw_cdic(const zcdi::chips::Cdic& cdic) {
     }
 }
 
-void draw_vmpeg(const zcdi::chips::VmpegDevice& vmpeg, const zcdi::dvc::DvcVideo& video, bool dvc_loaded) {
+void draw_dvc(const zcdi::dvc::Dvc& dvc, bool dvc_loaded) {
     if (!dvc_loaded) ImGui::TextDisabled("No DVC cartridge ROM loaded");
-    const zcdi::chips::VmpegSaveState& s = vmpeg.state();
+    const zcdi::dvc::FmvSaveState& s = dvc.fmv_state();
+    const zcdi::dvc::FmaSaveState& a = dvc.fma_state();
+    const zcdi::dvc::DvcVideo& video = dvc.video();
     if (ImGui::CollapsingHeader("FMV (video)", ImGuiTreeNodeFlags_DefaultOpen) && begin_fields("fmv")) {
         field("System command", "%04X", s.fmv_system_command_register_);
         field("Video command", "%04X", s.fmv_video_command_register_);
@@ -128,23 +130,23 @@ void draw_vmpeg(const zcdi::chips::VmpegDevice& vmpeg, const zcdi::dvc::DvcVideo
         ImGui::EndTable();
     }
     if (ImGui::CollapsingHeader("FMA (audio)", ImGuiTreeNodeFlags_DefaultOpen) && begin_fields("fma")) {
-        field("Command / status", "%04X / %02X", s.fma_command_register_, s.fma_status_register_);
-        field("ISR / IER / IVR", "%04X / %04X / %04X", s.fma_interrupt_status_register_,
-              s.fma_interrupt_enable_register_, s.fma_interrupt_vector_register_);
-        field("Stream", "%d", s.fma_stream_number_);
-        field("Header", "%08X", s.fma_mpeg_audio_header_);
-        field("DSP enabled", "%s", yes(vmpeg.audio_dsp_enabled()));
-        field("Unplayed samples", "%d", s.fma_unplayed_samples_);
-        field("ES bytes waiting", "%zu", s.fma_es_bytes_.size());
-        field("Volume LL LR RL RR", "%d %d %d %d", s.mpeg_volume_l2l_, s.mpeg_volume_l2r_, s.mpeg_volume_r2l_,
-              s.mpeg_volume_r2r_);
+        field("Command / status", "%04X / %02X", a.fma_command_register_, a.fma_status_register_);
+        field("ISR / IER / IVR", "%04X / %04X / %04X", a.fma_interrupt_status_register_,
+              a.fma_interrupt_enable_register_, a.fma_interrupt_vector_register_);
+        field("Stream", "%d", a.fma_stream_number_);
+        field("Header", "%08X", a.fma_mpeg_audio_header_);
+        field("DSP enabled", "%s", yes((a.fma_status_register_ & zcdi::dvc::vmpeg::kFmaStatusDecoding) != 0));
+        field("Unplayed samples", "%d", a.fma_unplayed_samples_);
+        field("ES bytes waiting", "%zu", a.fma_es_bytes_.size());
+        field("Volume LL LR RL RR", "%d %d %d %d", a.mpeg_volume_l2l_, a.mpeg_volume_l2r_, a.mpeg_volume_r2l_,
+              a.mpeg_volume_r2r_);
         ImGui::EndTable();
     }
     if (ImGui::CollapsingHeader("Host interface") && begin_fields("vmpeg_host")) {
-        field("MPEG RAM", "%s", yes(vmpeg.mpeg_ram_enabled()));
+        field("MPEG RAM", "%s", yes(dvc.mpeg_ram_enabled()));
         field("DMA to", "%s%s", s.dma_for_fma_ ? "FMA" : "FMV", s.dma_active_ ? ", active" : "");
         field("Pending", "%s%s%s", s.clear_fifo_pending_ ? "clear FIFO " : "",
-              s.decoder_off_pending_ ? "decoder off " : "", s.audio_reset_pending_ ? "audio reset" : "");
+              s.decoder_off_pending_ ? "decoder off " : "", a.audio_reset_pending_ ? "audio reset" : "");
         ImGui::EndTable();
     }
 }
@@ -238,7 +240,7 @@ void DevicesWidget::draw(AppState& state) {
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("VMPEG / DVC")) {
-            draw_vmpeg(view.vmpeg(), view.dvc_video(), state.dvc_rom_loaded);
+            draw_dvc(view.dvc(), state.dvc_rom_loaded);
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("SCC68070")) {

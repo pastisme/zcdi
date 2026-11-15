@@ -38,7 +38,7 @@ TEST_CASE("first frame presents when asked") {
     CHECK(v.height() == kDvcMpeg1Height);
 }
 
-// Bus publishes the next picture's size to VMPEG IMGSZ.
+// Dvc publishes the next picture's size to VMPEG IMGSZ.
 TEST_CASE("the next picture is the front of the queue") {
     DvcVideo v;
     CHECK_FALSE(v.has_next_picture());
@@ -120,7 +120,7 @@ TEST_CASE("unfed instance is inert") {
 
 // ---- FMV "Clear FIFO" (DvcVideo::clear_fifo) --------------------------------
 // SYSCMD Clear FIFO: drops bitstream and queued pictures, keeps the shown frame.
-// Both shapes go through VmpegDevice's demuxer, as in Bus.
+// Both shapes go through Dvc's demuxer, as in Dvc.
 namespace {
 size_t cut_offset(bool es) { return es ? kClipAEsCutOffset : kClipAPsCutOffset; }
 
@@ -132,7 +132,7 @@ uint64_t frame_hash(const DvcVideo& v) {
     return h;
 }
 
-// One "field" per chunk, in Bus's order: feed -> decode_frame -> present.
+// One "field" per chunk, in Dvc's order: feed -> decode_frame -> present.
 void play(DvcVideo& v, VmpegFeed& feed, const uint8_t* data, size_t size, size_t chunk, std::vector<Shown>& shown,
           int drain_fields = 40) {
     for (size_t pos = 0; pos < size; pos += chunk) {

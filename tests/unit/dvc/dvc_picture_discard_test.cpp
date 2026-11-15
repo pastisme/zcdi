@@ -7,6 +7,7 @@
 #include "dvc/dvc_video.h"
 #include "fixtures/dvc_clear_fifo_fixture.h"
 #include "support/vmpeg_feed.h"
+#include "support/dvc_private.h"
 #include "support/vmpeg_regs.h"
 
 using namespace zcdi::dvc;
@@ -16,7 +17,7 @@ namespace {
 constexpr size_t kSecondGop = 976;  // clip A ES: SEQ, then I, open-GOP Bs, P, Bs
 constexpr uint8_t kSequenceEnd[] = {0x00, 0x00, 0x01, 0xb7};
 
-size_t dts_entries(VmpegFeed& feed) { return feed.device().state().fmv_dts_fifo_.size(); }
+size_t dts_entries(VmpegFeed& feed) { return feed.device().fmv_state().fmv_dts_fifo_.size(); }
 
 // Decodes everything, showing pictures as the queue fills. Returns the pictures discarded.
 int decode_all(DvcVideo& v, std::vector<uint8_t>* shown_status = nullptr) {
@@ -62,7 +63,7 @@ TEST_CASE("a discarded picture's DTS leaves the dts_fifo") {
     VmpegFeed feed;
     feed.push(kClipAEs, sizeof(kClipAEs));
     REQUIRE(dts_entries(feed) == 12);
-    feed.device().note_picture_discarded();
+    note_picture_discarded(feed.device());
     CHECK(dts_entries(feed) == 11);
 }
 

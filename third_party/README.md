@@ -25,7 +25,7 @@ of other emulators' device models and carry their licence notice as well.
 |--------------------------|--------------|--------------|--------|
 | `src/chips/scc68070/`, `mcd212/`, `cdic/`, `slave/` | [MAME](https://github.com/mamedev/mame)'s CD-i devices | BSD-3-Clause | `src/chips/LICENSE-MAME` |
 | `m68ki_stack_frame_1111()` in `musashi/m68kcpu.h` | MAME's `m68kcpu.h` | BSD-3-Clause | `src/chips/LICENSE-MAME` |
-| `src/chips/vmpeg/`       | [CDi_MiSTer](https://github.com/MiSTer-devel/CDi_MiSTer)'s VMPEG | GPL-3.0 | zcdi's `LICENSE` |
+| `src/dvc/`: `vmpeg.h`, `dvc_registers.cpp`, `frame_player.cpp`, `fma.cpp` | [CDi_MiSTer](https://github.com/MiSTer-devel/CDi_MiSTer)'s VMPEG | GPL-3.0 | zcdi's `LICENSE` |
 | `src/chips/mk48t08/`     | Not derived  | n/a          | n/a    |
 
 ## debugger/third_party

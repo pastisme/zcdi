@@ -24,7 +24,7 @@ void feed_clip_a_three_times(DvcVideo& v, bool es) {
     for (int i = 0; i < 3; ++i) v.feed(zcdi_test::demux_video(a.data, a.size));
 }
 
-// Bus's field order: decode every field, show on every `present_every`th.
+// Dvc's field order: decode every field, show on every `present_every`th.
 std::vector<Shown> run(bool es, int present_every, size_t* max_depth) {
     DvcVideo v;
     feed_clip_a_three_times(v, es);

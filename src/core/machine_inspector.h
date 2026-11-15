@@ -13,11 +13,10 @@ class Cdic;
 class Mcd212;
 class Scc68070Periph;
 class SlaveHle;
-class VmpegDevice;
 } // namespace chips
 namespace dvc {
-class DvcVideo;
-}
+class Dvc;
+} // namespace dvc
 
 // Read access to a machine's internals for debuggers, tracers and tests.
 // What it returns is const, but backed by the live, writable machine: a
@@ -75,8 +74,7 @@ public:
     const chips::Scc68070Periph& scc68070() const;
     const chips::SlaveHle& slave() const;
     const chips::Cdic& cdic() const;
-    const chips::VmpegDevice& vmpeg() const;
-    const dvc::DvcVideo& dvc_video() const;
+    const dvc::Dvc& dvc() const;
 
 private:
     const Machine& machine_;

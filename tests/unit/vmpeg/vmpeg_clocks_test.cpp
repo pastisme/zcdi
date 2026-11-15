@@ -5,29 +5,30 @@
 #include <cstdint>
 #include <vector>
 
-#include "chips/vmpeg/vmpeg.h"
+#include "dvc/dvc.h"
+#include "support/dvc_private.h"
 #include "support/vmpeg_regs.h"
 
-using zcdi::chips::VmpegDevice;
+using zcdi::dvc::Dvc;
 using namespace zcdi_test;
 
 namespace {
-constexpr uint16_t kIntTim = zcdi::chips::vmpeg::kIntTim;
-constexpr uint16_t kDecoderOn = zcdi::chips::vmpeg::kSysCmdDecoderOn;
+constexpr uint16_t kIntTim = zcdi::dvc::vmpeg::kIntTim;
+constexpr uint16_t kDecoderOn = zcdi::dvc::vmpeg::kSysCmdDecoderOn;
 constexpr int kCyclesPerDclkTick = 1000 / 3 + 1;  // 3 ticks per 1000 CPU cycles
 
 // DCLK ticks until TIM is next raised, one tick at a time.
-int ticks_until_tim(VmpegDevice& v) {
+int ticks_until_tim(Dvc& v) {
     for (int ticks = 1; ticks <= 10000; ++ticks) {
-        const uint32_t start = v.free_running_dclk();
-        while (v.free_running_dclk() == start) v.tick_cycles(1);
-        if (v.fmv_isr() & kIntTim) return ticks;
+        const uint32_t start = v.fma_state().fma_dclk_;
+        while (v.fma_state().fma_dclk_ == start) v.tick_cycles(1);
+        if (fmv_isr(v) & kIntTim) return ticks;
     }
     return -1;
 }
 
 // A pack header with SCR = `scr` (90 kHz), MPEG-1 layout.
-void feed_pack(VmpegDevice& v, int64_t scr) {
+void feed_pack(Dvc& v, int64_t scr) {
     const std::vector<uint8_t> pack = {0,
                                        0,
                                        1,
@@ -43,7 +44,7 @@ void feed_pack(VmpegDevice& v, int64_t scr) {
     for (size_t i = 0; i < pack.size(); i += 2) v.feed_dma_word(uint16_t(pack[i] << 8 | pack[i + 1]));
 }
 
-void tick_dclk(VmpegDevice& v, int ticks) {
+void tick_dclk(Dvc& v, int ticks) {
     for (int i = 0; i < ticks; ++i) v.tick_cycles(kCyclesPerDclkTick);
 }
 }  // namespace
@@ -51,11 +52,11 @@ void tick_dclk(VmpegDevice& v, int ticks) {
 TEST_SUITE("vmpeg") {
 
 TEST_CASE("DCLK high/low reads return one consistent counter value") {
-    VmpegDevice v;
+    Dvc v;
 
     // Well past a 16-bit rollover, so the low word is nonzero.
     for (int i = 0; i < 5; ++i) v.tick_cycles(1'000'000);
-    const uint32_t dclk = v.free_running_dclk();
+    const uint32_t dclk = v.fma_state().fma_dclk_;
     REQUIRE(dclk != 0);
     // A coincidental 0 low word would mask the bug.
     REQUIRE((dclk & 0xffffu) != 0);
@@ -68,19 +69,19 @@ TEST_CASE("DCLK high/low reads return one consistent counter value") {
 
 // The firmware programs TCNT = 55 (448 ticks, 100.446 Hz).
 TEST_CASE("TIM fires every (TCNT + 1) * 8 DCLK ticks") {
-    VmpegDevice v;
+    Dvc v;
     write16(v, kFmvTcntOffset, 55);
     write16(v, kFmvTrldOffset, 0);  // restart the count
 
     CHECK(ticks_until_tim(v) == 448);
     v.read_byte(kFmvIsrOffset);
     v.read_byte(kFmvIsrOffset + 1);  // clears ISR
-    REQUIRE((v.fmv_isr() & kIntTim) == 0);
+    REQUIRE((fmv_isr(v) & kIntTim) == 0);
     CHECK(ticks_until_tim(v) == 448);
 }
 
 TEST_CASE("the FMV clock takes a pack's SCR 15 dclk ticks after it arrives") {
-    VmpegDevice v;
+    Dvc v;
     write16(v, kFmvSyscmdOffset, kDecoderOn);
     feed_pack(v, 90000);  // 1 s: dclk 45000, GEN_SYSCR 703
     tick_dclk(v, 14);
@@ -90,7 +91,7 @@ TEST_CASE("the FMV clock takes a pack's SCR 15 dclk ticks after it arrives") {
 }
 
 TEST_CASE("a GEN_SYSCR write cancels the pending SCR load") {
-    VmpegDevice v;
+    Dvc v;
     write16(v, kFmvSyscmdOffset, kDecoderOn);
     feed_pack(v, 90000);
     tick_dclk(v, 5);

@@ -78,7 +78,7 @@ TEST_CASE("the DVC decode-RAM gap opens after 64 VMPEG register writes") {
     // kExtraBase is not tied to the gate.
     CHECK(bus.is_decoded(kExtraBase));
 
-    // Completing writes to the VMPEG window (VmpegDevice::note_bus_write_access).
+    // Completing writes to the VMPEG window (Dvc::note_bus_write_access).
     for (int i = 0; i < 64; ++i) bus.write8(kDvcRegBase + 1, 0);
 
     // After it, vmpega.rom's accesses must not fault.
