@@ -112,7 +112,7 @@ TEST_CASE("a matching state damaged past its identity checks changes nothing, NV
 
     CHECK(!load_machine(*m, bad));
     CHECK(zcdi_test::first_difference(save_machine(*m), current) == -1);
-    const std::span<const std::byte> kept = m->bus().nvram_data();
+    const std::span<const std::byte> kept = m->nvram_data();
     CHECK(std::equal(kept.begin(), kept.begin() + 0x1ff0, nvram.begin()));
     m->run_frame();  // still runs
 }
@@ -147,7 +147,7 @@ TEST_CASE("a damaged state loaded without undo cold boots, NVRAM kept") {
     zcdi_test::blank_section(now, "RTC ");
     zcdi_test::blank_section(power_on, "RTC ");
     CHECK(zcdi_test::first_difference(now, power_on) == -1);
-    const std::span<const std::byte> kept = m->bus().nvram_data();
+    const std::span<const std::byte> kept = m->nvram_data();
     CHECK(std::equal(kept.begin(), kept.begin() + 0x1ff0, nvram.begin()));
 }
 

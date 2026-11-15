@@ -31,7 +31,7 @@ target_sources(mpeg2 PRIVATE src/dvc/mpeg2_glue.c)
 target_include_directories(mpeg2 PRIVATE src)
 
 set(ZCDI_SOURCES
-    src/core/bus.cpp
+    src/core/board.cpp
     src/core/machine.cpp
     src/core/machine_inspector.cpp
     src/core/pointing_device.cpp

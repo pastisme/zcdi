@@ -27,12 +27,12 @@ Machine::Machine(std::span<const std::byte> bios, VideoStandard video_standard, 
     : refresh_rate_(zcdi::refresh_rate(video_standard)),
       field_lines_(zcdi::field_lines(video_standard)),
       line_(field_lines_) {
-    cpu_ = std::make_unique<MusashiCore>(bus_);
-    bus_.load_bios(bios);
-    if (!params.dvc.empty()) bus_.load_dvc(params.dvc);
-    if (!params.nvram.empty()) bus_.load_nvram(params.nvram);
-    bus_.set_auto_play_enabled(params.auto_play);
-    bus_.set_video_standard(video_standard);
+    cpu_ = std::make_unique<MusashiCore>(board_);
+    board_.load_bios(bios);
+    if (!params.dvc.empty()) board_.load_dvc(params.dvc);
+    if (!params.nvram.empty()) board_.load_nvram(params.nvram);
+    board_.set_auto_play_enabled(params.auto_play);
+    board_.set_video_standard(video_standard);
     StateWriter w(power_on_state_);
     state_io(w);
 }
@@ -47,39 +47,39 @@ void Machine::reset_by_slave() {
     const int frame = frame_count_;
     reset();
     frame_count_ = frame;
-    bus_.note_reset_by_slave();
+    board_.note_reset_by_slave();
 }
 
 void Machine::restore_power_on(bool keep_ram) {
     std::vector<uint8_t> kept;
     StateWriter keep(kept);
-    bus_.nvram_state_io(keep);
-    if (keep_ram) bus_.ram_state_io(keep);
+    board_.nvram_state_io(keep);
+    if (keep_ram) board_.ram_state_io(keep);
 
     StateReader baseline(power_on_state_);
     state_io(baseline, StateLoadContext::kPowerOnBaseline);
     StateReader restore(kept);
-    bus_.nvram_state_io(restore);
-    if (keep_ram) bus_.ram_state_io(restore);
+    board_.nvram_state_io(restore);
+    if (keep_ram) board_.ram_state_io(restore);
     if (baseline.failed() || restore.failed()) {
         // A field list reads back differently than it writes.
         std::fprintf(stderr, "[zcdi] internal error: power-on state didn't reload\n");
     }
 
     // Before the reset pulse: the CPU fetches SSP/PC from these vectors.
-    bus_.prepare_reset_vectors();
+    board_.prepare_reset_vectors();
     cpu_->reset();
 }
 
 bool Machine::mount_disc(std::unique_ptr<Disc> disc) {
     if (!disc) return false;
     disc_ = std::move(disc);
-    bus_.set_disc(disc_.get());
+    board_.set_disc(disc_.get());
     return true;
 }
 
 void Machine::remove_disc() {
-    bus_.set_disc(nullptr);
+    board_.set_disc(nullptr);
     disc_.reset();
 }
 
@@ -131,7 +131,7 @@ void Machine::state_io(T& archive, StateLoadContext context) {
 
     // Inside ZCST, so a reader can skip the whole machine (libretro/savestate.cpp).
     cpu_->state_io(archive);
-    bus_.state_io(archive);
+    board_.state_io(archive);
     archive.end_section();
     if constexpr (T::kLoading) {
         if (archive.failed()) return;
@@ -155,8 +155,8 @@ bool Machine::state_matches(StateReader r) {
     int frame_count = 0;
     header_io(r, /*external=*/true, byteswap, frame_count);
     r.skip_section(state_tag("CPU "));
-    r.begin_section(state_tag("BUS "));
-    bus_.identity_io(r);
+    r.begin_section(state_tag("BORD"));
+    board_.identity_io(r);
     return !r.failed();
 }
 
@@ -171,7 +171,7 @@ bool Machine::load_state(StateReader& r, bool skip_undo) {
     }
     undo_nvram_.clear();
     StateWriter nvram(undo_nvram_);
-    bus_.nvram_state_io(nvram);
+    board_.nvram_state_io(nvram);
 
     state_io(r);
     if (!r.failed()) return true;
@@ -185,41 +185,52 @@ bool Machine::load_state(StateReader& r, bool skip_undo) {
                  skip_undo ? "state loaded without undo" : "state before the load");
     restore_power_on(/*keep_ram=*/false);
     StateReader keep(undo_nvram_);
-    bus_.nvram_state_io(keep);
+    board_.nvram_state_io(keep);
     return false;
 }
 
-AudioStreams Machine::drain_audio() { return bus_.drain_audio(); }
+AudioStreams Machine::drain_audio() { return board_.drain_audio(); }
+
+Machine::VideoFrame Machine::video_frame() const {
+    return {
+        .pixels = board_.video_framebuffer(),
+        .width = board_.video_active_width(),
+        .height = board_.video_active_height(),
+        .pitch = board_.video_width(),
+        .buffer_height = board_.video_height(),
+        .display_aspect = board_.video_display_aspect(),
+    };
+}
 
 void Machine::run_frame() {
     ++frame_count_;
 
-    bus_.slave_tick_frame(); // once per frame
+    board_.slave_tick_frame(); // once per frame
 
     // Line by line, so the MCD212's line work and interrupts land in time.
     const int64_t field_cycles = cycles_per_frame_for(refresh_rate_);
     int64_t done = 0;
     // Interlaced even fields have a line more, in the same cycles.
-    const int lines = bus_.video_begin_field(field_lines_);
+    const int lines = board_.video_begin_field(field_lines_);
     for (line_ = 0; line_ < lines; ++line_) {
         const int64_t line_end = field_cycles * (line_ + 1) / lines;
         while (done < line_end) {
-            int tick_chunk = bus_.cdic_disc_active() ? kFineTickChunk : kPeriphTickChunk;
+            int tick_chunk = board_.cdic_disc_active() ? kFineTickChunk : kPeriphTickChunk;
             int chunk = int(std::min<int64_t>(line_end - done, tick_chunk));
             // Can overshoot `chunk` (the last instruction completes); the
             // overshoot is charged to the next line.
             int consumed = cpu_->run(chunk);
-            bus_.periph_tick(consumed);
-            if (bus_.consume_slave_reset_request()) reset_by_slave();
-            cpu_->set_irq(bus_.update_interrupts());
+            board_.periph_tick(consumed);
+            if (board_.consume_slave_reset_request()) reset_by_slave();
+            cpu_->set_irq(board_.update_interrupts());
             done += consumed;
         }
-        bus_.video_end_of_line(line_);
-        cpu_->set_irq(bus_.update_interrupts());
+        board_.video_end_of_line(line_);
+        cpu_->set_irq(board_.update_interrupts());
     }
 
-    bus_.dvc_tick_frame(refresh_rate_);
-    bus_.video_end_field();
+    board_.dvc_tick_frame(refresh_rate_);
+    board_.video_end_field();
 }
 
 } // namespace zcdi

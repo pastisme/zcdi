@@ -187,22 +187,22 @@ void DebuggerApp::queue_audio_frame() {
 void DebuggerApp::step_emulation_frame() {
     if (!state_.machine) return;
 
-    zcdi::Bus& bus = state_.machine->bus();
-    bus.plug(zcdi::Bus::Socket::kFront, state_.front_mouse ? zcdi::DeviceId::kRelative : zcdi::DeviceId::kManeuvering);
+    zcdi::Machine& machine = *state_.machine;
+    machine.plug(zcdi::Socket::kFront, state_.front_mouse ? zcdi::DeviceId::kRelative : zcdi::DeviceId::kManeuvering);
     const bool button12 = state_.input.pressed_button12 || state_.input.mouse_button12 || state_.input.keyboard_key_a;
-    bus.set_socket_input(zcdi::Bus::Socket::kFront,
-                         {
-                             .left = state_.input.keyboard_left,
-                             .right = state_.input.keyboard_right,
-                             .up = state_.input.keyboard_up,
-                             .down = state_.input.keyboard_down,
-                             .mouse_dx = state_.input.dx,
-                             .mouse_dy = state_.input.dy,
-                             .button1 = button12 || state_.input.pressed_button1 || state_.input.mouse_button1 ||
-                                        state_.input.keyboard_key_z || state_.input.keyboard_key_s,
-                             .button2 = button12 || state_.input.pressed_button2 || state_.input.mouse_button2 ||
-                                        state_.input.keyboard_key_x,
-                         });
+    machine.set_socket_input(zcdi::Socket::kFront,
+                             {
+                                 .left = state_.input.keyboard_left,
+                                 .right = state_.input.keyboard_right,
+                                 .up = state_.input.keyboard_up,
+                                 .down = state_.input.keyboard_down,
+                                 .mouse_dx = state_.input.dx,
+                                 .mouse_dy = state_.input.dy,
+                                 .button1 = button12 || state_.input.pressed_button1 || state_.input.mouse_button1 ||
+                                            state_.input.keyboard_key_z || state_.input.keyboard_key_s,
+                                 .button2 = button12 || state_.input.pressed_button2 || state_.input.mouse_button2 ||
+                                            state_.input.keyboard_key_x,
+                             });
     state_.input.dx = 0;
     state_.input.dy = 0;
     state_.input.pressed_button1 = false;
@@ -213,7 +213,7 @@ void DebuggerApp::step_emulation_frame() {
     queue_audio_frame();
     copy_framebuffer();
 
-    std::string uart = state_.machine->bus().drain_uart_output();
+    std::string uart = state_.machine->drain_uart_output();
     if (!uart.empty()) {
         std::fwrite(uart.data(), 1, uart.size(), stdout);
         std::fflush(stdout);
@@ -223,10 +223,11 @@ void DebuggerApp::step_emulation_frame() {
 // Mid-frame, the lines drawn so far over the previous frame's.
 void DebuggerApp::copy_framebuffer() {
     if (!state_.machine) return;
-    state_.active_w = state_.machine->bus().video_active_width();
-    state_.active_h = state_.machine->bus().video_active_height();
-    state_.display_aspect = static_cast<float>(state_.machine->bus().video_display_aspect());
-    const uint32_t* src = state_.machine->bus().video_framebuffer();
+    const zcdi::Machine::VideoFrame frame = state_.machine->video_frame();
+    state_.active_w = frame.width;
+    state_.active_h = frame.height;
+    state_.display_aspect = static_cast<float>(frame.display_aspect);
+    const uint32_t* src = frame.pixels;
     if (!src || state_.framebuffer.empty()) return;
     for (std::size_t i = 0; i < state_.framebuffer.size(); ++i)
         state_.framebuffer[i] = xrgb_to_rgba(src[i]);
@@ -335,8 +336,12 @@ void DebuggerApp::execute_command() {
 void DebuggerApp::reset_machine(bool cold) {
     if (!state_.machine) return;
     state_.runner->finish_frame();
+    if (cold && state_.auto_play != state_.built_auto_play) {
+        start_machine(); // Auto Play is fixed when the machine is built
+        if (state_.machine) state_.runner->attach(state_.machine.get());
+        return;
+    }
     if (cold) {
-        state_.machine->bus().set_auto_play_enabled(state_.auto_play);
         state_.machine->cold_boot();
         state_.runner->attach(state_.machine.get());
     } else {
@@ -428,6 +433,7 @@ void DebuggerApp::start_machine() {
         zcdi::Machine::InitParams{.dvc = std::span<const std::byte>(dvc.data(), dvc.size()),
                                   .auto_play = state_.auto_play});
     state_.built_video_standard = state_.video_standard;
+    state_.built_auto_play = state_.auto_play;
     state_.machine->cold_boot();
 
     if (!config_.disc_path.empty() &&
@@ -437,8 +443,8 @@ void DebuggerApp::start_machine() {
         state_.status = "Running";
     }
 
-    int w = state_.machine->bus().video_width();
-    int h = state_.machine->bus().video_height();
+    int w = state_.machine->video_frame().pitch;
+    int h = state_.machine->video_frame().buffer_height;
     state_.audio_frames_per_emu_frame = static_cast<int>(kAudioSampleRate / state_.machine->refresh_rate());
     if (state_.audio_frames_per_emu_frame <= 0) state_.audio_frames_per_emu_frame = 1;
     state_.fallback_accum_sec = 0.0;

@@ -13,6 +13,9 @@ enum class DeviceId : uint8_t {
     kAbsoluteScreen = 'S', // touch screen, light pen
 };
 
+// Where a device plugs in: front "INPUT" on the SLAVE's SCI, back "INPUT 2" on the SCC68070 UART.
+enum class Socket : uint8_t { kFront, kBack };
+
 // First byte of a packet: sync, buttons; the rest carries position bits.
 enum PacketBits : uint8_t {
     kPacketNone = 0x00,

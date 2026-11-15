@@ -3,7 +3,7 @@
 
 namespace zcdi {
 
-class Bus;
+class Board;
 
 // Musashi's m68k_register_t values (static_asserted in musashi_core.cpp),
 // SCC68070-relevant ones only.
@@ -38,10 +38,10 @@ constexpr CpuReg address_reg(unsigned n) { return static_cast<CpuReg>(int(CpuReg
 
 // Musashi is one global CPU: the newest MusashiCore owns it, and only that
 // one may run. Destroying an older one leaves the owner alone. Memory goes
-// through bus.cpp's callbacks.
+// through board.cpp's callbacks.
 class MusashiCore {
 public:
-    explicit MusashiCore(Bus& bus);
+    explicit MusashiCore(Board& board);
     ~MusashiCore();
     MusashiCore(const MusashiCore&) = delete;
     MusashiCore& operator=(const MusashiCore&) = delete;
@@ -82,7 +82,7 @@ public:
 private:
     static int int_ack(int level);
 
-    Bus* bus_ = nullptr;
+    Board* board_ = nullptr;
 };
 
 } // namespace zcdi

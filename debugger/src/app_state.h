@@ -83,6 +83,7 @@ struct AppState {
     // A strap fixed at power-on: changing it rebuilds the machine.
     zcdi::VideoStandard video_standard = zcdi::VideoStandard::kNtsc;
     zcdi::VideoStandard built_video_standard = zcdi::VideoStandard::kNtsc;
+    bool built_auto_play = false;
     // Saved in the ini; used from the next power-on.
     bool auto_play = false;
     // Saved in the ini.

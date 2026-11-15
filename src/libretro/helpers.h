@@ -13,7 +13,6 @@
 
 namespace zcdi {
 
-class Bus;
 class Machine;
 class Mixer;
 

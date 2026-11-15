@@ -127,7 +127,7 @@ public:
     void set_int1(bool asserted);
 
     // Fixed-level external pins: in2 = 2, autovectored (SLAVE); in4 = 4,
-    // vectored by CDIC itself (Bus::interrupt_ack).
+    // vectored by CDIC itself (Board::interrupt_ack).
     void set_in2(bool asserted);
     void set_in4(bool asserted);
 
@@ -141,12 +141,12 @@ public:
     void uart_receive(uint8_t v);
     bool uart_receiver_enabled() const { return (uart_ucr_ & 3) == 1; }
 
-    // Channel 0 (CDIC), read and advanced by Bus::perform_cdic_dma.
+    // Channel 0 (CDIC), read and advanced by Board::perform_cdic_dma.
     uint8_t dma_operation_control() const { return dma_[0].ocr; }
     uint16_t dma_transfer_counter() const { return dma_[0].mtc; }
     uint32_t dma_memory_address_counter() const { return dma_[0].mac; }
     void advance_dma_memory_address_counter(uint32_t delta) { dma_[0].mac += delta; }
-    // Channel 1 (VMPEG), used by Bus::perform_vmpeg_dma.
+    // Channel 1 (VMPEG), used by Board::perform_vmpeg_dma.
     uint8_t dma_ch1_operation_control() const { return dma_[1].ocr; }
     uint16_t dma_ch1_transfer_counter() const { return dma_[1].mtc; }
     uint32_t dma_ch1_memory_address_counter() const { return dma_[1].mac; }

@@ -888,8 +888,8 @@ void m68k_set_cpu_type(unsigned int cpu_type)
 		case M68K_CPU_TYPE_SCC68070:
 			/* zcdi: own cycle rows (m68ki_cycles[5], exception row 5); CYC_*
 			 * constants from MAME's init_cpu_scc68070(). The mask stays 32-bit
-			 * for the on-chip window: bus.cpp's cpu_bus_address() drops A24-A31
-			 * for external accesses, as rtl/scc68070.sv does. */
+			 * for the on-chip window: board.cpp's cpu_bus_address() drops A24-A31
+			 * for external accesses. */
 			CPU_TYPE         = CPU_TYPE_SCC070;
 			CPU_ADDRESS_MASK = 0xffffffff;
 			CPU_SR_MASK      = 0xa71f; /* T1 -- S  -- -- I2 I1 I0 -- -- -- X  N  Z  V  C  */

@@ -217,7 +217,7 @@ void Cdic::write_reg_byte(uint32_t offset, uint8_t v) {
             raise_irq4();
             return;
         case kRegXbuf + 1: x_buffer_ = set_lo(x_buffer_, v); return;
-        // The write completing DMA control runs Bus::perform_cdic_dma.
+        // The write completing DMA control runs Board::perform_cdic_dma.
         case kRegDmaControl: dma_control_ = set_hi(dma_control_, v); return;
         case kRegDmaControl + 1: dma_control_ = set_lo(dma_control_, v); return;
         case kRegAudctl: audio_control_ = set_hi(audio_control_, v); return;

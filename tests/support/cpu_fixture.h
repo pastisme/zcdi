@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <initializer_list>
 
-#include "core/bus.h"
+#include "core/board.h"
 #include "core/cpu/musashi_core.h"
 
 namespace zcdi_test {
@@ -19,25 +19,25 @@ struct CpuFixture {
     static constexpr int kBusErrorVector = 2;
     static constexpr int kAddressErrorVector = 3;
 
-    zcdi::Bus bus;
-    zcdi::MusashiCore cpu{bus};
+    zcdi::Board board;
+    zcdi::MusashiCore cpu{board};
 
     CpuFixture() {
-        bus.write32(0x00000000, kInitialSsp);
-        bus.write32(0x00000004, kCodePc);
-        bus.write16(kNormalPc, kBraSelf);
+        board.write32(0x00000000, kInitialSsp);
+        board.write32(0x00000004, kCodePc);
+        board.write16(kNormalPc, kBraSelf);
     }
 
     void park_vector(int vector) {
-        bus.write32(uint32_t(vector) * 4, kHandlerPc);
-        bus.write16(kHandlerPc, kBraSelf);
+        board.write32(uint32_t(vector) * 4, kHandlerPc);
+        board.write16(kHandlerPc, kBraSelf);
     }
 
     // Writes 16-bit words at kCodePc onwards.
     void code(std::initializer_list<uint16_t> words) {
         uint32_t a = kCodePc;
         for (uint16_t w : words) {
-            bus.write16(a, w);
+            board.write16(a, w);
             a += 2;
         }
     }
@@ -48,8 +48,8 @@ struct CpuFixture {
     }
 
     // Field offsets of the SCC68070 Format 15 frame, from the stack pointer.
-    uint16_t frame_vector_word() { return bus.read16(cpu.sp() + 6); }
-    uint32_t frame_fault_address() { return bus.read32(cpu.sp() + 20); }
+    uint16_t frame_vector_word() { return board.read16(cpu.sp() + 6); }
+    uint32_t frame_fault_address() { return board.read32(cpu.sp() + 20); }
 };
 
 // Word helpers for code(): split a 32-bit absolute address or immediate.

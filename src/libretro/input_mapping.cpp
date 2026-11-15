@@ -143,14 +143,13 @@ PointingDevice::Input relative_input(retro_input_state_t input_state_cb, unsigne
     };
 }
 
-void poll_socket(retro_input_state_t input_state_cb, unsigned port, unsigned device, Bus::Socket socket,
-                 Machine& machine) {
+void poll_socket(retro_input_state_t input_state_cb, unsigned port, unsigned device, Socket socket, Machine& machine) {
     const std::optional<DeviceId> id = device_for_port(port, device);
-    machine.bus().plug(socket, id);
+    machine.plug(socket, id);
     if (!id) return;
     const bool absolute = *id == DeviceId::kAbsoluteCoordinate || *id == DeviceId::kAbsoluteScreen;
-    machine.bus().set_socket_input(
-        socket, absolute ? lightgun_input(input_state_cb, port) : relative_input(input_state_cb, port));
+    machine.set_socket_input(socket,
+                             absolute ? lightgun_input(input_state_cb, port) : relative_input(input_state_cb, port));
 }
 
 } // namespace
@@ -205,8 +204,8 @@ void set_port_device(unsigned port, unsigned device) {
 }
 
 void plug_port_devices(Machine& machine) {
-    machine.bus().plug(Bus::Socket::kFront, device_for_port(0, g_port0_device));
-    machine.bus().plug(Bus::Socket::kBack, device_for_port(1, g_port1_device));
+    machine.plug(Socket::kFront, device_for_port(0, g_port0_device));
+    machine.plug(Socket::kBack, device_for_port(1, g_port1_device));
 }
 
 void set_input_descriptors(retro_environment_t env) {
@@ -236,8 +235,8 @@ void set_input_descriptors(retro_environment_t env) {
 
 void poll_pointer_input(retro_input_state_t input_state_cb, Machine& machine) {
     if (!input_state_cb) return;
-    poll_socket(input_state_cb, 0, g_port0_device, Bus::Socket::kFront, machine);
-    poll_socket(input_state_cb, 1, g_port1_device, Bus::Socket::kBack, machine);
+    poll_socket(input_state_cb, 0, g_port0_device, Socket::kFront, machine);
+    poll_socket(input_state_cb, 1, g_port1_device, Socket::kBack, machine);
 }
 
 InputHistory& input_history() { return g_history; }

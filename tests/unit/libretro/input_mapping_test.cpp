@@ -84,8 +84,8 @@ TEST_CASE("the ports' devices are plugged before the first frame, so a state loa
     {
         std::unique_ptr<zcdi::Machine> m = zcdi_test::build_fake_machine();
         zcdi::plug_port_devices(*m);
-        CHECK(m->bus().plugged(zcdi::Bus::Socket::kFront) == zcdi::DeviceId::kManeuvering);
-        CHECK(!m->bus().plugged(zcdi::Bus::Socket::kBack));
+        CHECK(m->plugged(zcdi::Socket::kFront) == zcdi::DeviceId::kManeuvering);
+        CHECK(!m->plugged(zcdi::Socket::kBack));
         for (int i = 0; i < 20; ++i) m->run_frame();  // past the pad's power-on delay
         state = zcdi_test::save_machine(*m);
     }

@@ -9,6 +9,9 @@
 #include "core/machine_inspector.h"
 #include "support/fake_machine.h"
 #include "support/state_roundtrip.h"
+#include "support/machine_board.h"
+
+using zcdi_test::board;
 
 using zcdi_test::build_fake_machine;
 using zcdi_test::save_machine;
@@ -16,7 +19,7 @@ using zcdi_test::save_machine;
 namespace {
 
 constexpr uint32_t kCounter = 0x00001000;  // where the fake BIOS stores d0
-constexpr uint32_t kNvramBase = 0x320000;  // MK48T08, even bytes
+constexpr uint32_t kNvramBase = zcdi::address_map::kNvram.base;  // MK48T08, even bytes
 
 }  // namespace
 
@@ -26,7 +29,7 @@ TEST_CASE("peek reads memory without changing the machine") {
     std::unique_ptr<zcdi::Machine> m = build_fake_machine();
     m->run_frame();
     zcdi::MachineInspector view(*m);
-    CHECK(view.peek32(kCounter) == m->bus().read32(kCounter));
+    CHECK(view.peek32(kCounter) == board(*m).read32(kCounter));
     CHECK(view.peek8(0x4fffe0) == 0xff);  // MCD212 register
 
     const std::vector<uint8_t> before = save_machine(*m);
@@ -41,10 +44,10 @@ TEST_CASE("the RTC can be pinned and survives a cold boot") {
     using namespace std::chrono;
     m->set_rtc_boot_time(sys_days{1995y / July / 14} + 12h);
     m->cold_boot();
-    CHECK(m->bus().read8(kNvramBase + 0x1fff * 2) == 0x95);  // year, BCD
-    CHECK(m->bus().read8(kNvramBase + 0x1ffe * 2) == 0x07);  // month
-    CHECK(m->bus().read8(kNvramBase + 0x1ffd * 2) == 0x14);  // date
-    CHECK(m->bus().read8(kNvramBase + 0x1ff1 * 2) == 0x19);  // century, a stored byte
+    CHECK(board(*m).read8(kNvramBase + 0x1fff * 2) == 0x95);  // year, BCD
+    CHECK(board(*m).read8(kNvramBase + 0x1ffe * 2) == 0x07);  // month
+    CHECK(board(*m).read8(kNvramBase + 0x1ffd * 2) == 0x14);  // date
+    CHECK(board(*m).read8(kNvramBase + 0x1ff1 * 2) == 0x19);  // century, a stored byte
 }
 
 // Mid-frame lines are for a debugger stopped inside run_frame().

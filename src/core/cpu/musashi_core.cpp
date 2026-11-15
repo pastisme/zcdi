@@ -1,6 +1,6 @@
 #include "core/cpu/musashi_core.h"
 
-#include "core/bus.h"
+#include "core/board.h"
 #include "core/cpu/musashi_state.h"
 #include "core/state_archive.h"
 
@@ -23,9 +23,9 @@ static_assert(same_reg(CpuReg::Ppc, M68K_REG_PPC) && same_reg(CpuReg::Ir, M68K_R
 
 } // namespace
 
-MusashiCore::MusashiCore(Bus& bus) : bus_(&bus) {
+MusashiCore::MusashiCore(Board& board) : board_(&board) {
     g_core = this;
-    bus.set_cpu(this);
+    board.set_cpu(this);
     // Musashi's global CPU outlives us and reset keeps D0-D7: start from
     // zero so the power-on baseline doesn't depend on earlier runs.
     zcdi_m68k_state_clear();
@@ -38,7 +38,7 @@ MusashiCore::MusashiCore(Bus& bus) : bus_(&bus) {
 }
 
 MusashiCore::~MusashiCore() {
-    bus_->set_cpu(nullptr);
+    board_->set_cpu(nullptr);
     if (g_core == this) g_core = nullptr;
 }
 
@@ -46,7 +46,7 @@ MusashiCore::~MusashiCore() {
 // autovectors and Scc68070Periph::iack never runs.
 int MusashiCore::int_ack(int level) {
     if (!g_core) return M68K_INT_ACK_AUTOVECTOR;
-    const int vector = g_core->bus_->interrupt_ack(level);
+    const int vector = g_core->board_->interrupt_ack(level);
     // -1: a dedicated external pin, autovectored.
     return vector < 0 ? M68K_INT_ACK_AUTOVECTOR : vector;
 }

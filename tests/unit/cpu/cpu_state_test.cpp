@@ -33,12 +33,12 @@ Snapshot snapshot(CpuFixture& f) {
     s.sr = f.cpu.sr();
     s.usp = f.cpu.usp();
     s.isp = f.cpu.isp();
-    for (uint32_t addr = 0x4000; addr < 0x5000; ++addr) s.ram.push_back(f.bus.read8(addr));
+    for (uint32_t addr = 0x4000; addr < 0x5000; ++addr) s.ram.push_back(f.board.read8(addr));
     return s;
 }
 
 void restore_ram(CpuFixture& f, const Snapshot& s) {
-    for (uint32_t i = 0; i < s.ram.size(); ++i) f.bus.write8(0x4000 + i, s.ram[i]);
+    for (uint32_t i = 0; i < s.ram.size(); ++i) f.board.write8(0x4000 + i, s.ram[i]);
 }
 
 }  // namespace

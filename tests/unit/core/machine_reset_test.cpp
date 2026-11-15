@@ -10,6 +10,9 @@
 #include "support/fake_disc.h"
 #include "support/fake_machine.h"
 #include "support/state_roundtrip.h"
+#include "support/machine_board.h"
+
+using zcdi_test::board;
 
 using zcdi_test::build_fake_machine;
 using zcdi_test::save_machine;
@@ -18,24 +21,24 @@ namespace {
 
 constexpr uint32_t kRamMarker = 0x00008000;  // main RAM, untouched by the fake BIOS
 constexpr uint32_t kCounter = 0x00001000;    // where the fake BIOS stores d0
-constexpr uint32_t kCdicRam = 0x00300010;    // CDIC buffer RAM
+constexpr uint32_t kCdicRam = zcdi::address_map::kCdicRam.base + 0x10;
 
 // Leaves traces a reset must clear or keep: frames run, main RAM and a
 // chip's buffer RAM written.
 void dirty(zcdi::Machine& m) {
     for (int i = 0; i < 4; ++i) m.run_frame();
-    m.bus().write8(kRamMarker, 0x5a);
-    m.bus().write8(kCdicRam, 0x77);
+    board(m).write8(kRamMarker, 0x5a);
+    board(m).write8(kCdicRam, 0x77);
 }
 
-constexpr uint32_t kCdicReg = 0x00303c00;  // CDIC registers
+constexpr uint32_t kCdicReg = zcdi::address_map::kCdicRegs.base;
 
 void write_cdic16(zcdi::Machine& m, uint32_t off, uint16_t v) {
-    m.bus().write8(kCdicReg + off, uint8_t(v >> 8));
-    m.bus().write8(kCdicReg + off + 1, uint8_t(v));
+    board(m).write8(kCdicReg + off, uint8_t(v >> 8));
+    board(m).write8(kCdicReg + off + 1, uint8_t(v));
 }
 
-// Read Mode 2 of file 1 / channel 0 from LBA 0, through the bus. Returns the
+// Read Mode 2 of file 1 / channel 0 from LBA 0, through the board. Returns the
 // marker that landed in the bank DBUF points at, or -1.
 int read_first_sector_marker(zcdi::Machine& m) {
     write_cdic16(m, 0x006, 0x0100);  // file 1
@@ -48,10 +51,10 @@ int read_first_sector_marker(zcdi::Machine& m) {
     write_cdic16(m, 0x3fe, 0xc000);
     for (int frame = 0; frame < 50; ++frame) {
         m.run_frame();
-        if (!(m.bus().read8(kCdicReg + 0x3f6) & 0x80)) continue;
-        const uint16_t dbuf = uint16_t(m.bus().read8(kCdicReg + 0x3fe) << 8 | m.bus().read8(kCdicReg + 0x3ff));
+        if (!(board(m).read8(kCdicReg + 0x3f6) & 0x80)) continue;
+        const uint16_t dbuf = uint16_t(board(m).read8(kCdicReg + 0x3fe) << 8 | board(m).read8(kCdicReg + 0x3ff));
         const uint32_t bank = (dbuf & 1) ? 0xa00 : 0;
-        return m.bus().read8(0x00300000 + 8 + bank + 4);
+        return board(m).read8(zcdi::address_map::kCdicRam.base + 8 + bank + 4);
     }
     return -1;
 }
@@ -87,19 +90,19 @@ TEST_CASE("a SLAVE reset request resets the machine and turns Auto Play off") {
     m->cold_boot();
     REQUIRE(m->mount_disc(std::make_unique<zcdi_test::FakeDisc>(
         std::vector<uint8_t>(40, zcdi_test::kSubmodeData))));
-    REQUIRE(m->bus().playcdi_overlay_active());
+    REQUIRE(board(*m).playcdi_overlay_active());
 
     for (int i = 0; i < 3; ++i) m->run_frame();
-    CHECK(m->bus().read8(kBootCount) == 2);
-    CHECK_FALSE(m->bus().playcdi_overlay_active());
+    CHECK(board(*m).read8(kBootCount) == 2);
+    CHECK_FALSE(board(*m).playcdi_overlay_active());
 
     // Saved with the machine; an external reset or cold boot clears it.
     const std::vector<uint8_t> after_exit = save_machine(*m);
     SUBCASE("reset") { m->reset(); }
     SUBCASE("cold boot") { m->cold_boot(); }
-    CHECK(m->bus().playcdi_overlay_active());
+    CHECK(board(*m).playcdi_overlay_active());
     REQUIRE(zcdi_test::load_machine(*m, after_exit));
-    CHECK_FALSE(m->bus().playcdi_overlay_active());
+    CHECK_FALSE(board(*m).playcdi_overlay_active());
 }
 
 // The RTC keeps counting across a cold boot, so its section is blanked.
@@ -109,8 +112,8 @@ TEST_CASE("a cold boot after running matches a freshly built machine") {
         std::unique_ptr<zcdi::Machine> a = build_fake_machine();
         dirty(*a);
         a->cold_boot();
-        CHECK(a->bus().read8(kRamMarker) == 0);
-        CHECK(a->bus().read8(kCdicRam) == 0);
+        CHECK(board(*a).read8(kRamMarker) == 0);
+        CHECK(board(*a).read8(kCdicRam) == 0);
         for (int i = 0; i < 3; ++i) a->run_frame();
         after_cold_boot = save_machine(*a);
     }
@@ -125,22 +128,22 @@ TEST_CASE("a cold boot after running matches a freshly built machine") {
 TEST_CASE("a reset keeps main RAM and resets everything else") {
     std::unique_ptr<zcdi::Machine> m = build_fake_machine();
     dirty(*m);
-    const uint8_t counter_byte = m->bus().read8(kCounter + 3);
+    const uint8_t counter_byte = board(*m).read8(kCounter + 3);
     REQUIRE(counter_byte != 0);
     m->reset();
-    CHECK(m->bus().read8(kRamMarker) == 0x5a);
-    CHECK(m->bus().read8(kCounter + 3) == counter_byte);
-    CHECK(m->bus().read8(kCdicRam) == 0);
+    CHECK(board(*m).read8(kRamMarker) == 0x5a);
+    CHECK(board(*m).read8(kCounter + 3) == counter_byte);
+    CHECK(board(*m).read8(kCdicRam) == 0);
 
     // Apart from main RAM (and the RTC), a reset machine is a cold-booted
     // one: cold boot the same machine, put the same RAM back, compare.
     std::vector<uint8_t> after_reset = save_machine(*m);
     std::vector<uint8_t> ram;
     zcdi::StateWriter keep(ram);
-    m->bus().ram_state_io(keep);
+    board(*m).ram_state_io(keep);
     m->cold_boot();
     zcdi::StateReader restore(ram);
-    m->bus().ram_state_io(restore);
+    board(*m).ram_state_io(restore);
     REQUIRE(!restore.failed());
     std::vector<uint8_t> cold_plus_ram = save_machine(*m);
     zcdi_test::blank_section(after_reset, "RTC ");
@@ -151,14 +154,14 @@ TEST_CASE("a reset keeps main RAM and resets everything else") {
 TEST_CASE("NVRAM keeps its address and contents across a cold boot and a reset") {
     std::unique_ptr<zcdi::Machine> m = build_fake_machine();
     // The frontend writes its .srm through this pointer (retro_get_memory_data).
-    std::byte* nvram = const_cast<std::byte*>(m->bus().nvram_data().data());
+    std::byte* nvram = const_cast<std::byte*>(m->nvram_data().data());
     nvram[0x100] = std::byte{0xa5};
     m->run_frame();
     m->cold_boot();
-    CHECK(m->bus().nvram_data().data() == nvram);
+    CHECK(m->nvram_data().data() == nvram);
     CHECK(nvram[0x100] == std::byte{0xa5});
     m->reset();
-    CHECK(m->bus().nvram_data().data() == nvram);
+    CHECK(m->nvram_data().data() == nvram);
     CHECK(nvram[0x100] == std::byte{0xa5});
 }
 

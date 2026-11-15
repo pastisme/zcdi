@@ -1,5 +1,5 @@
 #pragma once
-// One whole field through Mcd212's line API, as Bus drives it.
+// One whole field through Mcd212's line API, as Board drives it.
 #include <cstddef>
 #include <cstdint>
 

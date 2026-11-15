@@ -169,7 +169,7 @@ public:
     // True while Fetch TOC, Play CDDA, Read or Seek is running.
     bool disc_active() const { return disc_command_ != cdic::kCmdIdle; }
 
-    // Low 14 bits: start word in CDIC RAM for Bus::perform_cdic_dma.
+    // Low 14 bits: start word in CDIC RAM for Board::perform_cdic_dma.
     uint16_t dma_control() const { return dma_control_; }
 
     // Interleaved stereo S16 at 44100 Hz (ADPCM resampled from 37800 Hz).

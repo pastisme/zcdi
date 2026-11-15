@@ -20,6 +20,98 @@ namespace zcdi {
 
 class MusashiCore;
 
+// The Mono-I address map: each region's range, and the table every decode goes through.
+namespace address_map {
+
+struct Range {
+    uint32_t base, size;
+    constexpr bool contains(uint32_t a) const { return a - base < size; }
+};
+constexpr Range kPlane0{0x000000, 0x080000}; // video plane 0 DRAM
+constexpr Range kPlane1{0x200000, 0x080000}; // video plane 1 DRAM
+constexpr Range kCdicRam{0x300000, 0x003c00};
+constexpr Range kCdicRegs{0x303c00, 0x000400};
+constexpr Range kSlave{0x310000, 0x008000};
+// Ignored: the video driver writes 0x318000 at every boot.
+constexpr Range kSlaveNvramGap{0x318000, 0x008000};
+constexpr Range kNvram{0x320000, 0x004000}; // MK48T08 timekeeper, even bytes
+constexpr Range kBios{0x400000, 0x080000};
+constexpr Range kMcd212{0x4fffe0, 0x000020};
+constexpr Range kExtraRam{0x500000, 0x080000}; // additional system RAM
+// Faults without a cartridge, so the OS-9 RAM probe never pools it.
+constexpr Range kDvcCartRam{0xd00000, 0x100000};
+constexpr Range kDvcRegs{0xe00000, 0x040000};
+constexpr Range kDvcCartRom{0xe40000, 0x040000}; // vmpega.rom
+constexpr Range kDvcDecodeRam{0xe80000, 0x080000}; // hidden until the firmware enables it
+constexpr Range kPlayCdiOverlay{0xf00000, 0x010000}; // the Auto Play overlay ROM
+constexpr Range kScc{0x80000000, 0x80000000}; // on-chip, supervisor only
+
+// Lookup order; `sdram` adds the SDRAM access wait states.
+
+enum class Region : uint8_t {
+    kNone,
+    kPlane0,
+    kPlane1,
+    kBios,
+    kExtraRam,
+    kNvram,
+    kCdicRam,
+    kDvcCartRam,
+    kDvcCartRom,
+    kDvcDecodeRam,
+    kPlayCdiOverlay,
+    kCdicRegs,
+    kSlave,
+    kMcd212,
+    kSlaveNvramGap,
+    kScc,
+    kDvcRegs,
+};
+struct MapEntry {
+    Range range;
+    Region region;
+    bool sdram;
+};
+constexpr MapEntry kMap[] = {
+    {kPlane0, Region::kPlane0, true},
+    {kPlane1, Region::kPlane1, true},
+    {kBios, Region::kBios, true},
+    {kExtraRam, Region::kExtraRam, false},
+    {kNvram, Region::kNvram, false},
+    {kCdicRam, Region::kCdicRam, false},
+    {kDvcCartRam, Region::kDvcCartRam, true},
+    {kDvcCartRom, Region::kDvcCartRom, true},
+    {kDvcDecodeRam, Region::kDvcDecodeRam, true},
+    {kPlayCdiOverlay, Region::kPlayCdiOverlay, false},
+    {kCdicRegs, Region::kCdicRegs, false},
+    {kSlave, Region::kSlave, false},
+    {kMcd212, Region::kMcd212, false},
+    {kSlaveNvramGap, Region::kSlaveNvramGap, false},
+    {kScc, Region::kScc, false},
+    {kDvcRegs, Region::kDvcRegs, false},
+};
+
+constexpr bool map_has_no_overlaps() {
+    for (const MapEntry& x : kMap)
+        for (const MapEntry& y : kMap)
+            if (&x != &y && x.range.contains(y.range.base)) return false;
+    return true;
+}
+static_assert(map_has_no_overlaps());
+
+struct Decoded {
+    Region region = Region::kNone;
+    uint32_t offset = 0; // from the region's base
+    bool sdram = false;
+};
+constexpr Decoded decode(uint32_t a) {
+    for (const MapEntry& e : kMap)
+        if (e.range.contains(a)) return {e.region, a - e.range.base, e.sdram};
+    return {};
+}
+
+} // namespace address_map
+
 // One drain's worth of decoded audio per source, interleaved stereo S16.
 struct AudioStreams {
     std::vector<int16_t> cdic;
@@ -27,7 +119,7 @@ struct AudioStreams {
 };
 
 // RAM goes through ram_state_io().
-struct BusSaveState {
+struct BoardSaveState {
     // Which device's request holds IN4 (an SR latch on the board).
     enum class In4Owner { kIdle, kCdic, kVmpeg } in4_owner_ = In4Owner::kIdle;
     bool last_reset_by_slave_ = false;
@@ -37,9 +129,9 @@ struct BusSaveState {
     }
 };
 
-class Bus : private BusSaveState {
+class Board : private BoardSaveState {
 public:
-    Bus();
+    Board();
 
     uint8_t read8(uint32_t addr);
     uint16_t read16(uint32_t addr);
@@ -150,8 +242,6 @@ public:
     // Audio since the last drain, one stream per source; Mixer sums them.
     AudioStreams drain_audio();
 
-    // Front "INPUT" on the SLAVE's SCI, back "INPUT 2" on the SCC68070 UART.
-    enum class Socket : uint8_t { kFront, kBack };
     // Not saved; the same type keeps the plugged device.
     void plug(Socket socket, std::optional<DeviceId> id);
     std::optional<DeviceId> plugged(Socket socket) const;
@@ -171,6 +261,7 @@ private:
     // Memory without side effects (RAM, ROM, NVRAM, CDIC RAM, overlay);
     // false for registers and unmapped addresses.
     bool plain_byte(uint32_t a, uint8_t& v) const;
+    bool plain_byte(const address_map::Decoded& d, uint8_t& v) const;
 
     void perform_cdic_dma();
     void perform_vmpeg_dma();

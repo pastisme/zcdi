@@ -233,12 +233,13 @@ RETRO_API void retro_run(void) {
     if (g_machine) {
         zcdi::poll_pointer_input(input_state_cb, *g_machine);
         g_machine->run_frame();
-        std::string uart = g_machine->bus().drain_uart_output();
+        std::string uart = g_machine->drain_uart_output();
         if (!uart.empty()) {
             zcdi::log_msg(RETRO_LOG_INFO, "%s", uart.c_str());
         }
-        const int width = g_machine->bus().video_active_width();
-        const int height = g_machine->bus().video_active_height();
+        const zcdi::Machine::VideoFrame frame = g_machine->video_frame();
+        const int width = frame.width;
+        const int height = frame.height;
         if (width != g_out_width || height != g_out_height) {
             g_out_width = width;
             g_out_height = height;
@@ -258,8 +259,8 @@ RETRO_API void retro_run(void) {
 
     // No copy: the framebuffer is unchanged until the next run_frame().
     if (video_cb && g_machine) {
-        video_cb(g_machine->bus().video_framebuffer(), unsigned(g_out_width), unsigned(g_out_height),
-                 static_cast<size_t>(kWidth) * sizeof(uint32_t));
+        const zcdi::Machine::VideoFrame frame = g_machine->video_frame();
+        video_cb(frame.pixels, unsigned(g_out_width), unsigned(g_out_height), size_t(frame.pitch) * sizeof(uint32_t));
     }
 
     const int frames = static_cast<int>(kSampleRate / g_region_profile->refresh_rate());

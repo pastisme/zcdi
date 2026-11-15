@@ -19,7 +19,7 @@ enum class DvcMode {
 NvramStorageMode get_nvram_storage_mode(retro_environment_t env);
 DvcMode get_dvc_mode(retro_environment_t env);
 
-// The playcdi.mod overlay (Bus::set_auto_play_enabled). Off by default.
+// The playcdi.mod overlay (Board::set_auto_play_enabled). Off by default.
 bool get_auto_play_enabled(retro_environment_t env);
 
 enum LibretroRegion : unsigned {

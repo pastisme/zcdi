@@ -1,5 +1,6 @@
 // As SLAVE firmware 2.0 programs the two AD7528 DACs: code/256 of the input,
 // scaled 9/16. 0 dB is code 255 -> 143, 6 dB code 128 -> 72.
+#include "core/board.h"
 #include "doctest.h"
 
 #include <cstdint>
@@ -13,7 +14,7 @@ using zcdi::chips::SlaveHle;
 
 namespace {
 
-constexpr uint32_t kChannel2 = 0x310005;
+constexpr uint32_t kChannel2 = zcdi::address_map::kSlave.base + 5;
 constexpr int kTickCycles = 7680;  // the SLAVE timer's 512 us tick at 15 MHz
 
 void send(SlaveHle& slave, std::initializer_list<uint8_t> bytes) {
