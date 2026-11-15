@@ -3,7 +3,7 @@
 #include <vector>
 
 namespace zcdi {
-namespace mamecdi {
+namespace chips {
 
 // One pair for the CDIC's life; pass the same one to every call.
 struct History {
@@ -23,5 +23,5 @@ struct AdpcmResampleState {
 void resample_adpcm_to_44100(const std::vector<int16_t>& in_37800hz, std::vector<int16_t>& out_44100hz,
                              AdpcmResampleState& state);
 
-} // namespace mamecdi
+} // namespace chips
 } // namespace zcdi

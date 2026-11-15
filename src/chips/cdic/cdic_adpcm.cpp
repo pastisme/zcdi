@@ -1,9 +1,9 @@
-#include "cdic/cdic_adpcm.h"
+#include "chips/cdic/cdic_adpcm.h"
 
 #include "core/util.h"
 
 namespace zcdi {
-namespace mamecdi {
+namespace chips {
 
 namespace {
 // Filter gains K0/K1 in 64ths (Green Book Figure IV.15: 0.9375 = 60/64, ...).
@@ -205,5 +205,5 @@ void resample_adpcm_to_44100(const std::vector<int16_t>& in_37800hz, std::vector
     state.carry.assign(combined.begin() + consumed_frames * 2, combined.end());
 }
 
-} // namespace mamecdi
+} // namespace chips
 } // namespace zcdi

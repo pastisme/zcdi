@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "core/machine.h"
-#include "mk48t08/mk48t08.h"
+#include "chips/mk48t08/mk48t08.h"
 #include "support/fake_disc.h"
 #include "support/fake_machine.h"
 #include "support/state_roundtrip.h"
@@ -101,7 +101,7 @@ TEST_CASE("a bad machine state is rejected and changes nothing") {
 }
 
 TEST_CASE("a matching state damaged past its identity checks changes nothing, NVRAM included") {
-    std::vector<std::byte> nvram(zcdi::mamecdi::Mk48t08::kSize);
+    std::vector<std::byte> nvram(zcdi::chips::Mk48t08::kSize);
     for (size_t i = 0; i < 0x1ff0; ++i) nvram[i] = std::byte(i * 7);  // below the clock registers
     std::unique_ptr<zcdi::Machine> m = build_fake_machine_with({.nvram = nvram});
     for (int i = 0; i < 3; ++i) m->run_frame();
@@ -132,7 +132,7 @@ TEST_CASE("a state loaded without undo loads like any other") {
 }
 
 TEST_CASE("a damaged state loaded without undo cold boots, NVRAM kept") {
-    std::vector<std::byte> nvram(zcdi::mamecdi::Mk48t08::kSize);
+    std::vector<std::byte> nvram(zcdi::chips::Mk48t08::kSize);
     for (size_t i = 0; i < 0x1ff0; ++i) nvram[i] = std::byte(i * 7);
     std::unique_ptr<zcdi::Machine> m = build_fake_machine_with({.nvram = nvram});
     std::vector<uint8_t> power_on = save_machine(*m);

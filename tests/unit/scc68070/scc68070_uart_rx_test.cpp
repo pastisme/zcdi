@@ -3,10 +3,10 @@
 
 #include <cstdint>
 
-#include "scc68070/scc68070.h"
+#include "chips/scc68070/scc68070.h"
 
-using zcdi::mamecdi::Scc68070Periph;
-using namespace zcdi::mamecdi::scc68070;
+using zcdi::chips::Scc68070Periph;
+using namespace zcdi::chips::scc68070;
 
 TEST_SUITE("scc68070") {
 

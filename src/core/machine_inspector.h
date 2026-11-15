@@ -8,13 +8,13 @@ namespace zcdi {
 
 class Machine;
 class MusashiCore;
-namespace mamecdi {
+namespace chips {
 class Cdic;
 class Mcd212;
 class Scc68070Periph;
 class SlaveHle;
 class VmpegDevice;
-} // namespace mamecdi
+} // namespace chips
 namespace dvc {
 class DvcVideo;
 }
@@ -71,11 +71,11 @@ public:
     std::span<const std::byte> plane1_data() const;
     std::span<const std::byte> dvc_cart_ram_data() const;
     // The chips, read-only.
-    const mamecdi::Mcd212& mcd212() const;
-    const mamecdi::Scc68070Periph& scc68070() const;
-    const mamecdi::SlaveHle& slave() const;
-    const mamecdi::Cdic& cdic() const;
-    const mamecdi::VmpegDevice& vmpeg() const;
+    const chips::Mcd212& mcd212() const;
+    const chips::Scc68070Periph& scc68070() const;
+    const chips::SlaveHle& slave() const;
+    const chips::Cdic& cdic() const;
+    const chips::VmpegDevice& vmpeg() const;
     const dvc::DvcVideo& dvc_video() const;
 
 private:

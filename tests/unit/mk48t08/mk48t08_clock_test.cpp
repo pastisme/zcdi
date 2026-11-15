@@ -3,9 +3,9 @@
 #include <chrono>
 #include <cstdint>
 
-#include "mk48t08/mk48t08.h"
+#include "chips/mk48t08/mk48t08.h"
 
-using zcdi::mamecdi::Mk48t08;
+using zcdi::chips::Mk48t08;
 using namespace std::chrono;
 
 TEST_SUITE("mk48t08") {

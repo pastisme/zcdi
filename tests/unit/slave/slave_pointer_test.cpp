@@ -6,12 +6,12 @@
 #include <vector>
 
 #include "core/pointing_device.h"
-#include "slave/slave.h"
+#include "chips/slave/slave.h"
 #include "support/slave_rig.h"
 
-using zcdi::mamecdi::FrontDeviceType;
-using zcdi::mamecdi::Pc6;
-using zcdi::mamecdi::SlaveHle;
+using zcdi::chips::FrontDeviceType;
+using zcdi::chips::Pc6;
+using zcdi::chips::SlaveHle;
 using zcdi_test::channel_addr;
 
 namespace {

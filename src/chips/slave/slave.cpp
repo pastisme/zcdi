@@ -1,4 +1,4 @@
-#include "slave/slave.h"
+#include "chips/slave/slave.h"
 
 #include "core/pointing_device.h"
 #include "core/state_archive.h"
@@ -7,7 +7,7 @@
 #include <algorithm>
 
 namespace zcdi {
-namespace mamecdi {
+namespace chips {
 
 using namespace slave;
 
@@ -663,5 +663,5 @@ void SlaveHle::publish_pointer() {
     queue_response(kChannelPointer, report, 4);
 }
 
-} // namespace mamecdi
+} // namespace chips
 } // namespace zcdi

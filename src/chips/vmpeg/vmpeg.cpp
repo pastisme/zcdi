@@ -1,11 +1,11 @@
-#include "vmpeg/vmpeg.h"
+#include "chips/vmpeg/vmpeg.h"
 
 #include <algorithm>
 
 #include "core/state_archive.h"
 
 namespace zcdi {
-namespace mamecdi {
+namespace chips {
 
 using namespace vmpeg;
 
@@ -962,5 +962,5 @@ void VmpegDevice::complete_dma() {
     fma_command_register_ &= ~kFmaCmdStartDma;
 }
 
-} // namespace mamecdi
+} // namespace chips
 } // namespace zcdi

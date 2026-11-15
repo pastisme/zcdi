@@ -1,8 +1,8 @@
 #include "widgets/mcd212_widget.h"
 
+#include "chips/mcd212/mcd212.h"
 #include "core/machine_inspector.h"
 #include "imgui/imgui.h"
-#include "mcd212/mcd212.h"
 #include "stream_texture.h"
 #include "widgets/widget_ui.h"
 
@@ -13,8 +13,8 @@
 
 namespace {
 
-using zcdi::mamecdi::Mcd212SaveState;
-using namespace zcdi::mamecdi::mcd212;
+using zcdi::chips::Mcd212SaveState;
+using namespace zcdi::chips::mcd212;
 
 constexpr ImVec4 kCurrentLine{1.0f, 0.75f, 0.3f, 1.0f};
 
@@ -137,7 +137,7 @@ std::string dcr_flags(uint16_t dcr) {
     return s.empty() ? "-" : s;
 }
 
-void draw_registers(const Mcd212SaveState& r, const zcdi::mamecdi::Mcd212& chip) {
+void draw_registers(const Mcd212SaveState& r, const zcdi::chips::Mcd212& chip) {
     const ImGuiTableFlags flags =
         ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_BordersInnerV;
     if (ImGui::BeginTable("paths", 3, flags)) {
@@ -266,7 +266,7 @@ void draw_clut(const Mcd212SaveState& r) {
 void Mcd212Widget::draw(AppState& state) {
     if (!begin_machine_window(state)) return;
     const zcdi::MachineInspector view(*state.machine);
-    const zcdi::mamecdi::Mcd212& chip = view.mcd212();
+    const zcdi::chips::Mcd212& chip = view.mcd212();
     const Mcd212SaveState& r = chip.state();
     // Mid-frame, the active line run_frame() is on.
     const int current = state.runner && state.runner->mid_frame() ? view.line() - chip.first_active_line() : -1;
@@ -316,7 +316,7 @@ void Mcd212Widget::release() { texture_.release(); }
 // The plane through Mcd212::preview_plane.
 void Mcd212Widget::draw_planes(AppState& state) {
     const zcdi::MachineInspector view(*state.machine);
-    const zcdi::mamecdi::Mcd212& chip = view.mcd212();
+    const zcdi::chips::Mcd212& chip = view.mcd212();
     const Mcd212SaveState& r = chip.state();
     constexpr int kWidth = Mcd212SaveState::kFbWidth;
     constexpr int kHeight = Mcd212SaveState::kFbHeight;

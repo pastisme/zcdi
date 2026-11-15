@@ -1,16 +1,16 @@
-#include "mk48t08/mk48t08.h"
+#include "chips/mk48t08/mk48t08.h"
 
 #include <algorithm>
 #include <cstddef>
 #include <ctime>
 
-#include "scc68070/scc68070.h"
+#include "chips/scc68070/scc68070.h"
 
 #include "core/state_archive.h"
 #include "core/util.h"
 
 namespace zcdi {
-namespace mamecdi {
+namespace chips {
 
 namespace {
 
@@ -112,5 +112,5 @@ void Mk48t08::seed_century() {
     data_[kTkCentury] = to_bcd(int(date.year()) / 100 % 100);
 }
 
-} // namespace mamecdi
+} // namespace chips
 } // namespace zcdi

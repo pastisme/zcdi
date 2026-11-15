@@ -1728,7 +1728,7 @@ static inline void m68ki_stack_frame_1000(uint pc, uint sr, uint vector)
 /* Format 15 (0xf) stack frame (68070/SCC68070): the 17-word bus/address
  * error frame with the fault address. zcdi: ported verbatim from MAME's
  * m68ki_stack_frame_1111().
- * MAME's m68kcpu.h is BSD-3-Clause, see mamecdi/LICENSE.
+ * MAME's m68kcpu.h is BSD-3-Clause, see src/chips/LICENSE-MAME.
  */
 static inline void m68ki_stack_frame_1111(uint pc, uint sr, uint vector, uint fault_address)
 {

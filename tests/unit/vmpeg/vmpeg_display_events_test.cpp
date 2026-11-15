@@ -3,11 +3,11 @@
 
 #include <cstdint>
 
-#include "vmpeg/vmpeg.h"
+#include "chips/vmpeg/vmpeg.h"
 #include "support/vmpeg_regs.h"
 
-using zcdi::mamecdi::VmpegDevice;
-using namespace zcdi::mamecdi::vmpeg;
+using zcdi::chips::VmpegDevice;
+using namespace zcdi::chips::vmpeg;
 using namespace zcdi_test;
 
 namespace {

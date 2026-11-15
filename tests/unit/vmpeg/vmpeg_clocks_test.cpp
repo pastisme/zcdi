@@ -5,15 +5,15 @@
 #include <cstdint>
 #include <vector>
 
-#include "vmpeg/vmpeg.h"
+#include "chips/vmpeg/vmpeg.h"
 #include "support/vmpeg_regs.h"
 
-using zcdi::mamecdi::VmpegDevice;
+using zcdi::chips::VmpegDevice;
 using namespace zcdi_test;
 
 namespace {
-constexpr uint16_t kIntTim = zcdi::mamecdi::vmpeg::kIntTim;
-constexpr uint16_t kDecoderOn = zcdi::mamecdi::vmpeg::kSysCmdDecoderOn;
+constexpr uint16_t kIntTim = zcdi::chips::vmpeg::kIntTim;
+constexpr uint16_t kDecoderOn = zcdi::chips::vmpeg::kSysCmdDecoderOn;
 constexpr int kCyclesPerDclkTick = 1000 / 3 + 1;  // 3 ticks per 1000 CPU cycles
 
 // DCLK ticks until TIM is next raised, one tick at a time.

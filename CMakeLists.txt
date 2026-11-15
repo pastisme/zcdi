@@ -43,13 +43,13 @@ set(ZCDI_SOURCES
     src/disc/m3u_parser.cpp
     src/disc/raw2352_disc.cpp
     src/disc/chd_disc.cpp
-    mamecdi/mcd212/mcd212.cpp
-    mamecdi/scc68070/scc68070.cpp
-    mamecdi/slave/slave.cpp
-    mamecdi/cdic/cdic.cpp
-    mamecdi/cdic/cdic_adpcm.cpp
-    mamecdi/mk48t08/mk48t08.cpp
-    mamecdi/vmpeg/vmpeg.cpp
+    src/chips/mcd212/mcd212.cpp
+    src/chips/scc68070/scc68070.cpp
+    src/chips/slave/slave.cpp
+    src/chips/cdic/cdic.cpp
+    src/chips/cdic/cdic_adpcm.cpp
+    src/chips/mk48t08/mk48t08.cpp
+    src/chips/vmpeg/vmpeg.cpp
     src/dvc/dvc_video.cpp
     src/dvc/dvc_audio.cpp
     src/dvc/mpeg2_state.cpp
@@ -78,7 +78,6 @@ target_compile_features(zcdi PUBLIC cxx_std_20 PRIVATE c_std_11)
 target_include_directories(zcdi
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${CMAKE_CURRENT_SOURCE_DIR}/mamecdi
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )

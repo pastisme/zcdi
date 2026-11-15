@@ -3,11 +3,11 @@
 #include <cstdint>
 #include <vector>
 
-#include "scc68070/scc68070.h"
+#include "chips/scc68070/scc68070.h"
 #include "support/state_roundtrip.h"
 
-using zcdi::mamecdi::Scc68070Periph;
-using namespace zcdi::mamecdi::scc68070;
+using zcdi::chips::Scc68070Periph;
+using namespace zcdi::chips::scc68070;
 
 namespace {
 

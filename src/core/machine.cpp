@@ -16,7 +16,7 @@ constexpr int kPeriphTickChunk = 1000;
 // While the CDIC streams: the timer0 tick, so a CDIC IRQ4 lands promptly.
 constexpr int kFineTickChunk = 96;
 
-int cycles_per_frame_for(double refresh_rate) { return static_cast<int>(mamecdi::kCpuClockHz / refresh_rate); }
+int cycles_per_frame_for(double refresh_rate) { return static_cast<int>(chips::kCpuClockHz / refresh_rate); }
 
 } // namespace
 

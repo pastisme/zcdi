@@ -6,10 +6,10 @@
 #include <initializer_list>
 #include <vector>
 
-#include "scc68070/scc68070.h"
-#include "slave/slave.h"
+#include "chips/scc68070/scc68070.h"
+#include "chips/slave/slave.h"
 
-using zcdi::mamecdi::SlaveHle;
+using zcdi::chips::SlaveHle;
 
 namespace {
 

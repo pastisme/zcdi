@@ -7,7 +7,7 @@
 #include <span>
 
 namespace zcdi {
-namespace mamecdi {
+namespace chips {
 
 // Image format: raw 8192 bytes, no header. Never
 // touches files; the frontend persists data() and feeds load().
@@ -52,5 +52,5 @@ private:
     std::chrono::sys_seconds current_time() const;
 };
 
-} // namespace mamecdi
+} // namespace chips
 } // namespace zcdi

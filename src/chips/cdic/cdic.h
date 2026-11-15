@@ -3,11 +3,11 @@
 #include <cstdint>
 #include <vector>
 
-#include "cdic/cdic_adpcm.h"
+#include "chips/cdic/cdic_adpcm.h"
 #include "disc/disc.h"
 
 namespace zcdi {
-namespace mamecdi {
+namespace chips {
 
 // Register values, as CdicSaveState and CDIC RAM hold them.
 namespace cdic {
@@ -203,5 +203,5 @@ private:
     std::size_t audio_out_mark_ = 0;
 };
 
-} // namespace mamecdi
+} // namespace chips
 } // namespace zcdi

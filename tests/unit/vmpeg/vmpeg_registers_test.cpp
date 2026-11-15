@@ -3,17 +3,17 @@
 
 #include <cstdint>
 
-#include "vmpeg/vmpeg.h"
+#include "chips/vmpeg/vmpeg.h"
 #include "support/vmpeg_regs.h"
 
 using zcdi::VideoStandard;
-using zcdi::mamecdi::VmpegDevice;
+using zcdi::chips::VmpegDevice;
 using namespace zcdi_test;
 
 namespace {
-constexpr uint16_t kDecoderOn = zcdi::mamecdi::vmpeg::kSysCmdDecoderOn;
-constexpr uint16_t kDecoderOff = zcdi::mamecdi::vmpeg::kSysCmdDecoderOff;
-constexpr uint16_t kPlay = zcdi::mamecdi::vmpeg::kSysCmdPlay;
+constexpr uint16_t kDecoderOn = zcdi::chips::vmpeg::kSysCmdDecoderOn;
+constexpr uint16_t kDecoderOff = zcdi::chips::vmpeg::kSysCmdDecoderOff;
+constexpr uint16_t kPlay = zcdi::chips::vmpeg::kSysCmdPlay;
 constexpr int kRate25 = 3;  // picture_rate code: 25 Hz
 }  // namespace
 

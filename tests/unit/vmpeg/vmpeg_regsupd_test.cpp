@@ -3,19 +3,19 @@
 
 #include <cstdint>
 
-#include "vmpeg/vmpeg.h"
+#include "chips/vmpeg/vmpeg.h"
 #include "support/vmpeg_regs.h"
 
-using zcdi::mamecdi::VmpegDevice;
+using zcdi::chips::VmpegDevice;
 using namespace zcdi_test;
 
 namespace {
-constexpr uint16_t kPlay = zcdi::mamecdi::vmpeg::kSysCmdPlay;
-constexpr uint16_t kStep = zcdi::mamecdi::vmpeg::kSysCmdStep;
-constexpr uint16_t kRegsUpd = zcdi::mamecdi::vmpeg::kVidCmdRegsUpd;
-constexpr uint16_t kScroll = zcdi::mamecdi::vmpeg::kVidCmdScroll;
-constexpr uint16_t kShow = zcdi::mamecdi::vmpeg::kVidCmdShow;
-constexpr uint16_t kIntVcup = zcdi::mamecdi::vmpeg::kIntVcup;
+constexpr uint16_t kPlay = zcdi::chips::vmpeg::kSysCmdPlay;
+constexpr uint16_t kStep = zcdi::chips::vmpeg::kSysCmdStep;
+constexpr uint16_t kRegsUpd = zcdi::chips::vmpeg::kVidCmdRegsUpd;
+constexpr uint16_t kScroll = zcdi::chips::vmpeg::kVidCmdScroll;
+constexpr uint16_t kShow = zcdi::chips::vmpeg::kVidCmdShow;
+constexpr uint16_t kIntVcup = zcdi::chips::vmpeg::kIntVcup;
 constexpr uint16_t kIntDcl = 1u << 7;
 constexpr uint32_t kPalField = 600'000;
 constexpr int kFirstActiveLine = 26;

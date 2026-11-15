@@ -3,7 +3,7 @@
 #include <vector>
 
 namespace zcdi {
-namespace mamecdi {
+namespace chips {
 
 // Register values, as Mcd212SaveState and plane memory hold them.
 namespace mcd212 {
@@ -436,5 +436,5 @@ private:
     void rebuild_after_load();
 };
 
-} // namespace mamecdi
+} // namespace chips
 } // namespace zcdi

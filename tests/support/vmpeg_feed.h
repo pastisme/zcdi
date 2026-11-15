@@ -6,7 +6,7 @@
 #include <vector>
 
 #include "dvc/dvc_video.h"
-#include "vmpeg/vmpeg.h"
+#include "chips/vmpeg/vmpeg.h"
 #include "support/vmpeg_regs.h"
 
 namespace zcdi_test {
@@ -67,10 +67,10 @@ public:
     void set_video_stream(int number) { write16(device_, kFmvStreamNumOffset, uint16_t(number)); }
 
     int program_ends() const { return program_ends_; }
-    zcdi::mamecdi::VmpegDevice& device() { return device_; }
+    zcdi::chips::VmpegDevice& device() { return device_; }
 
 private:
-    zcdi::mamecdi::VmpegDevice device_;
+    zcdi::chips::VmpegDevice device_;
     bool has_pending_ = false;
     uint8_t pending_ = 0;
     int program_ends_ = 0;

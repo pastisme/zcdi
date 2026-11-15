@@ -5,7 +5,7 @@
 #include <vector>
 
 #include "core/pointing_device.h"
-#include "scc68070/scc68070.h"
+#include "chips/scc68070/scc68070.h"
 #include "support/state_roundtrip.h"
 
 using zcdi::DeviceId;
@@ -13,7 +13,7 @@ using zcdi::PointingDevice;
 
 namespace {
 
-constexpr int kByteCycles = zcdi::mamecdi::kCpuClockHz / 120;
+constexpr int kByteCycles = zcdi::chips::kCpuClockHz / 120;
 constexpr int kChunk = 1000;
 
 // The bytes the device sends in `byte_times` byte times with RTS asserted.

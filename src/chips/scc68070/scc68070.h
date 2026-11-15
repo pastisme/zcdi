@@ -3,7 +3,7 @@
 #include <string>
 
 namespace zcdi {
-namespace mamecdi {
+namespace chips {
 
 // 30 MHz crystal divided by 2; Musashi's
 // timing tables count these 15 MHz cycles.
@@ -164,5 +164,5 @@ private:
     std::string uart_output_;
 };
 
-} // namespace mamecdi
+} // namespace chips
 } // namespace zcdi

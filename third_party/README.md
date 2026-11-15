@@ -16,6 +16,18 @@ is in its directory or file headers.
 Local changes are marked inline with `zcdi` comments; keep them when
 updating from upstream.
 
+## Code derived from other projects
+
+The chip models in `src/chips/` are written for zcdi. Some are reimplementations
+of other emulators' device models and carry their licence notice as well.
+
+| Code                     | Derived from | Licence      | Notice |
+|--------------------------|--------------|--------------|--------|
+| `src/chips/scc68070/`, `mcd212/`, `cdic/`, `slave/` | [MAME](https://github.com/mamedev/mame)'s CD-i devices | BSD-3-Clause | `src/chips/LICENSE-MAME` |
+| `m68ki_stack_frame_1111()` in `musashi/m68kcpu.h` | MAME's `m68kcpu.h` | BSD-3-Clause | `src/chips/LICENSE-MAME` |
+| `src/chips/vmpeg/`       | [CDi_MiSTer](https://github.com/MiSTer-devel/CDi_MiSTer)'s VMPEG | GPL-3.0 | zcdi's `LICENSE` |
+| `src/chips/mk48t08/`     | Not derived  | n/a          | n/a    |
+
 ## debugger/third_party
 
 Used only by the debugger (its own CMake project in `debugger/`), not by the core.

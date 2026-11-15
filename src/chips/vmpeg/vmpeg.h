@@ -4,10 +4,10 @@
 #include <utility>
 #include <vector>
 
-#include "slave/slave.h" // VideoStandard
+#include "chips/slave/slave.h" // VideoStandard
 
 namespace zcdi {
-namespace mamecdi {
+namespace chips {
 
 // VMPEG (DVC cartridge) register values and the MPEG-1 system stream syntax it parses.
 namespace vmpeg {
@@ -537,5 +537,5 @@ private:
     VideoStandard video_standard_ = VideoStandard::kNtsc; // configuration, not saved
 };
 
-} // namespace mamecdi
+} // namespace chips
 } // namespace zcdi

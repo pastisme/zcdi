@@ -3,19 +3,19 @@
 #include <cstdint>
 #include <vector>
 
-#include "cdic/cdic.h"
+#include "chips/cdic/cdic.h"
 #include "support/cdic_rig.h"
 #include "support/fake_disc.h"
 
-using zcdi::mamecdi::Cdic;
+using zcdi::chips::Cdic;
 using zcdi_test::read_reg16;
 using zcdi_test::set_time;
 using zcdi_test::write_reg16;
 
 namespace {
 
-constexpr uint32_t kBuffer0 = zcdi::mamecdi::cdic::kAudioMap0;
-constexpr uint32_t kBuffer1 = zcdi::mamecdi::cdic::kAudioMap1;
+constexpr uint32_t kBuffer0 = zcdi::chips::cdic::kAudioMap0;
+constexpr uint32_t kBuffer1 = zcdi::chips::cdic::kAudioMap1;
 constexpr uint8_t kStereoLevelB = 0x01;  // 4 ticks a buffer
 constexpr int kTickCycles = 200000;      // one 75 Hz sector tick
 
@@ -24,10 +24,10 @@ void fill_buffer(Cdic& cdic, uint32_t base, uint8_t coding) {
     for (uint32_t i = 0; i < 2324; ++i) cdic.write_ram_byte(base + 12 + i, uint8_t(0x31 + i * 7));
 }
 
-constexpr uint32_t kAchan = zcdi::mamecdi::cdic::kRegAudioChannel;
-constexpr uint32_t kAbuf = zcdi::mamecdi::cdic::kRegAbuf;
-constexpr uint32_t kAudctl = zcdi::mamecdi::cdic::kRegAudctl;
-constexpr uint32_t kDbuf = zcdi::mamecdi::cdic::kRegDbuf;
+constexpr uint32_t kAchan = zcdi::chips::cdic::kRegAudioChannel;
+constexpr uint32_t kAbuf = zcdi::chips::cdic::kRegAbuf;
+constexpr uint32_t kAudctl = zcdi::chips::cdic::kRegAudctl;
+constexpr uint32_t kDbuf = zcdi::chips::cdic::kRegDbuf;
 
 void ticks(Cdic& cdic, int n) {
     for (int i = 0; i < n; ++i) cdic.tick_cycles(kTickCycles);

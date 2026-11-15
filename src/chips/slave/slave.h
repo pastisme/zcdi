@@ -3,14 +3,14 @@
 #include <utility>
 #include <vector>
 
-#include "scc68070/scc68070.h"
+#include "chips/scc68070/scc68070.h"
 
 namespace zcdi {
 
 // The SLAVE's STAND pin strap; values are what status command 0xf6 reports.
 enum class VideoStandard : uint8_t { kNtsc = 0x01, kPal = 0x02 };
 
-namespace mamecdi {
+namespace chips {
 
 // $b6 (firmware 0x762), as 0xf3 reports it.
 enum class FrontDeviceType : uint8_t {
@@ -282,5 +282,5 @@ private:
     void publish_pointer(); // 0xe0d
 };
 
-} // namespace mamecdi
+} // namespace chips
 } // namespace zcdi

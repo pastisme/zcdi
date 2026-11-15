@@ -1,7 +1,7 @@
 #pragma once
 #include "libretro/libretro.h"
 
-#include "slave/slave.h" // VideoStandard
+#include "chips/slave/slave.h" // VideoStandard
 
 namespace zcdi {
 void register_core_options(retro_environment_t env);

@@ -1,4 +1,4 @@
-#include "mcd212/mcd212.h"
+#include "chips/mcd212/mcd212.h"
 
 #include "core/state_archive.h"
 #include "core/util.h"
@@ -9,7 +9,7 @@
 #include <span>
 
 namespace zcdi {
-namespace mamecdi {
+namespace chips {
 
 using namespace mcd212;
 
@@ -1130,5 +1130,5 @@ void Mcd212::output_row(int y) {
     if (!woven_last_) put(2 * y + 1 - parity);
 }
 
-} // namespace mamecdi
+} // namespace chips
 } // namespace zcdi

@@ -4,11 +4,11 @@
 #include <cstdint>
 #include <vector>
 
-#include "vmpeg/vmpeg.h"
+#include "chips/vmpeg/vmpeg.h"
 #include "support/vmpeg_private.h"
 #include "support/vmpeg_regs.h"
 
-using zcdi::mamecdi::VmpegDevice;
+using zcdi::chips::VmpegDevice;
 using zcdi_test::kFmvGenDecCmdOffset;
 using zcdi_test::kFmvSyscmdOffset;
 using zcdi_test::kFmvSysScrOffset;

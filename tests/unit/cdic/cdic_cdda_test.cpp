@@ -3,11 +3,11 @@
 #include <cstdint>
 #include <vector>
 
-#include "cdic/cdic.h"
+#include "chips/cdic/cdic.h"
 #include "support/cdic_rig.h"
 #include "support/fake_audio_cd.h"
 
-using zcdi::mamecdi::Cdic;
+using zcdi::chips::Cdic;
 using zcdi_test::FakeAudioCd;
 using zcdi_test::set_time;
 using zcdi_test::write_reg16;

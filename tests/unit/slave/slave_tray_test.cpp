@@ -4,10 +4,10 @@
 #include <cstdint>
 #include <vector>
 
-#include "slave/slave.h"
+#include "chips/slave/slave.h"
 #include "support/slave_rig.h"
 
-using zcdi::mamecdi::SlaveHle;
+using zcdi::chips::SlaveHle;
 using zcdi_test::channel_addr;
 
 namespace {

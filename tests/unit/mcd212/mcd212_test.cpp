@@ -3,16 +3,16 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "mcd212/mcd212.h"
+#include "chips/mcd212/mcd212.h"
 #include "support/mcd212_field.h"
 #include "support/mcd212_regs.h"
 #include "support/private_access.h"
 
-using zcdi::mamecdi::Mcd212;
+using zcdi::chips::Mcd212;
 using zcdi_test::load_register;
 using zcdi_test::priv;
 using zcdi_test::write_mmio16;
-using namespace zcdi::mamecdi::mcd212;
+using namespace zcdi::chips::mcd212;
 
 // The decoders and the mixer, tested on their own.
 ZCDI_PRIVATE_MEMBER(ClutPixel, Mcd212, clut_pixel, uint32_t(int, uint8_t, uint8_t) const);

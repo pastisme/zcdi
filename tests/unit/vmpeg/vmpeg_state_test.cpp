@@ -3,11 +3,11 @@
 #include <cstdint>
 #include <vector>
 
-#include "vmpeg/vmpeg.h"
+#include "chips/vmpeg/vmpeg.h"
 #include "support/state_roundtrip.h"
 #include "support/vmpeg_regs.h"
 
-using zcdi::mamecdi::VmpegDevice;
+using zcdi::chips::VmpegDevice;
 using namespace zcdi_test;
 
 TEST_SUITE("vmpeg") {

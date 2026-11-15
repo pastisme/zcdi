@@ -50,7 +50,7 @@ constexpr int kSdramAccessWaitCycles = 2;
 constexpr bool in_range(uint32_t a, uint32_t base, uint32_t size) { return a >= base && a < base + size; }
 
 // `a` is in the NVRAM window; only the even byte lane decodes.
-static_assert(kNvramSize / 2 == mamecdi::Mk48t08::kSize);
+static_assert(kNvramSize / 2 == chips::Mk48t08::kSize);
 bool decode_nvram_bus_addr(uint32_t a, uint32_t& tk_off) {
     const uint32_t off = a - kNvramBase;
     if (off & 1u) return false;
@@ -158,7 +158,7 @@ void Bus::video_end_field() {
         mcd212_.set_dvc_frame(dvc_video_.frame_rgba(), dvc_video_.width(), dvc_video_.height());
     }
     mcd212_.set_dvc_attached(dvc_cart_present());
-    mamecdi::VmpegDevice::DisplayWindow w = vmpeg_.display_window();
+    chips::VmpegDevice::DisplayWindow w = vmpeg_.display_window();
     mcd212_.set_dvc_window(w.scrpos_x, w.scrpos_y, w.decwin_w, w.decwin_h, w.decoff_x, w.decoff_y, w.show,
                            w.vcd_pixel_clock);
     mcd212_.end_field();
@@ -522,7 +522,7 @@ void Bus::write8(uint32_t a, uint8_t v) {
     if (in_range(a, kCdicRegBase, kCdicRegSize)) {
         cdic_.write_reg_byte(a - kCdicRegBase, v);
         // The low byte completes the word write.
-        if (a - kCdicRegBase == mamecdi::cdic::kRegDmaControl + 1) perform_cdic_dma();
+        if (a - kCdicRegBase == chips::cdic::kRegDmaControl + 1) perform_cdic_dma();
         return;
     }
     if (in_range(a, kSlaveBase, kSlaveSize)) {

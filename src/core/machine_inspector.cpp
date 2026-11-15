@@ -60,15 +60,15 @@ uint32_t MachineInspector::peek32(uint32_t addr) const { return machine_.bus_.pe
 
 int MachineInspector::frame() const { return machine_.frame_count_; }
 
-const mamecdi::Mcd212& MachineInspector::mcd212() const { return machine_.bus_.mcd212_; }
+const chips::Mcd212& MachineInspector::mcd212() const { return machine_.bus_.mcd212_; }
 
-const mamecdi::Scc68070Periph& MachineInspector::scc68070() const { return machine_.bus_.scc_; }
+const chips::Scc68070Periph& MachineInspector::scc68070() const { return machine_.bus_.scc_; }
 
-const mamecdi::SlaveHle& MachineInspector::slave() const { return machine_.bus_.slave_; }
+const chips::SlaveHle& MachineInspector::slave() const { return machine_.bus_.slave_; }
 
-const mamecdi::Cdic& MachineInspector::cdic() const { return machine_.bus_.cdic_; }
+const chips::Cdic& MachineInspector::cdic() const { return machine_.bus_.cdic_; }
 
-const mamecdi::VmpegDevice& MachineInspector::vmpeg() const { return machine_.bus_.vmpeg_; }
+const chips::VmpegDevice& MachineInspector::vmpeg() const { return machine_.bus_.vmpeg_; }
 
 const dvc::DvcVideo& MachineInspector::dvc_video() const { return machine_.bus_.dvc_video_; }
 

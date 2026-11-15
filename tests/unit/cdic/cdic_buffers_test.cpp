@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <vector>
 
-#include "cdic/cdic.h"
+#include "chips/cdic/cdic.h"
 #include "support/cdic_rig.h"
 #include "support/fake_disc.h"
 

@@ -63,4 +63,4 @@ Yes.
 zcdi is licensed under the GNU General Public License, version 3 or (at your
 option) any later version; see [LICENSE](LICENSE). Bundled third-party
 components keep their own licences; see [third_party/](third_party/README.md)
-and [mamecdi/LICENSE](mamecdi/LICENSE) for the MAME-derived code.
+and [src/chips/LICENSE-MAME](src/chips/LICENSE-MAME) for the MAME-derived code.

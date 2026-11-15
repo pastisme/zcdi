@@ -1,4 +1,4 @@
-#include "scc68070/scc68070.h"
+#include "chips/scc68070/scc68070.h"
 
 #include "core/state_archive.h"
 #include "core/util.h"
@@ -7,7 +7,7 @@
 #include <utility>
 
 namespace zcdi {
-namespace mamecdi {
+namespace chips {
 
 using namespace scc68070;
 
@@ -244,5 +244,5 @@ void Scc68070Periph::uart_receive(uint8_t v) {
 
 std::string Scc68070Periph::drain_uart_output() { return std::exchange(uart_output_, {}); }
 
-} // namespace mamecdi
+} // namespace chips
 } // namespace zcdi

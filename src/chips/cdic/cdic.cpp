@@ -1,18 +1,18 @@
-#include "cdic/cdic.h"
+#include "chips/cdic/cdic.h"
 
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <utility>
 
-#include "cdic/cdic_adpcm.h"
+#include "chips/cdic/cdic_adpcm.h"
+#include "chips/scc68070/scc68070.h"
 #include "core/state_archive.h"
 #include "core/util.h"
 #include "disc/sector.h"
-#include "scc68070/scc68070.h"
 
 namespace zcdi {
-namespace mamecdi {
+namespace chips {
 
 using namespace cdic;
 
@@ -592,5 +592,5 @@ std::vector<int16_t> Cdic::drain_audio() {
     return std::exchange(audio_out_, {});
 }
 
-} // namespace mamecdi
+} // namespace chips
 } // namespace zcdi

@@ -2,14 +2,14 @@
 
 #include <algorithm>
 
-#include "scc68070/scc68070.h"
+#include "chips/scc68070/scc68070.h"
 
 namespace zcdi {
 namespace {
 
 // 1200 baud, 10 bits a byte.
-constexpr int kCyclesPerByte = mamecdi::kCpuClockHz / 120;
-constexpr int kPowerOnCycles = mamecdi::kCpuClockHz / 10;
+constexpr int kCyclesPerByte = chips::kCpuClockHz / 120;
+constexpr int kPowerOnCycles = chips::kCpuClockHz / 10;
 
 int saturate(int v) { return std::clamp(v, -127, 127); }
 

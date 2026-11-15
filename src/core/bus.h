@@ -7,16 +7,16 @@
 #include <string>
 #include <vector>
 
-#include "cdic/cdic.h"
+#include "chips/cdic/cdic.h"
+#include "chips/mcd212/mcd212.h"
+#include "chips/mk48t08/mk48t08.h"
+#include "chips/scc68070/scc68070.h"
+#include "chips/slave/slave.h"
+#include "chips/vmpeg/vmpeg.h"
 #include "core/pointing_device.h"
 #include "disc/disc.h"
 #include "dvc/dvc_audio.h"
 #include "dvc/dvc_video.h"
-#include "mcd212/mcd212.h"
-#include "mk48t08/mk48t08.h"
-#include "scc68070/scc68070.h"
-#include "slave/slave.h"
-#include "vmpeg/vmpeg.h"
 
 namespace zcdi {
 
@@ -197,7 +197,7 @@ private:
     bool dvc_cart_present() const { return !dvc_rom_.empty(); }
     // 0xe80000-0xefffff, hidden until vmpeg_.mpeg_ram_enabled().
     std::vector<uint8_t> dvc_decode_ram_;
-    mamecdi::Mk48t08 nvram_; // 0x320000-0x323fff: MK48T08 timekeeper
+    chips::Mk48t08 nvram_; // 0x320000-0x323fff: MK48T08 timekeeper
     std::vector<uint8_t> rom_; // 0x400000-0x47ffff: BIOS ROM
     // Save-state fingerprints.
     uint32_t rom_crc_ = 0;
@@ -208,9 +208,9 @@ private:
 
     MusashiCore* cpu_ = nullptr;
 
-    mamecdi::Mcd212 mcd212_; // 0x4fffe0-0x4fffff
-    mamecdi::Scc68070Periph scc_; // 0x80000000+
-    mamecdi::SlaveHle slave_; // 0x310000-0x317fff
+    chips::Mcd212 mcd212_; // 0x4fffe0-0x4fffff
+    chips::Scc68070Periph scc_; // 0x80000000+
+    chips::SlaveHle slave_; // 0x310000-0x317fff
     std::optional<PointingDevice> front_device_;
     std::optional<PointingDevice> back_device_;
     std::optional<PointingDevice>& socket(Socket s) { return s == Socket::kFront ? front_device_ : back_device_; }
@@ -219,8 +219,8 @@ private:
     }
     template <class T>
     void socket_state_io(T& archive, Socket s);
-    mamecdi::Cdic cdic_; // 0x300000-0x303fff
-    mamecdi::VmpegDevice vmpeg_; // 0xe00000-0xe3ffff, FMA/FMV registers
+    chips::Cdic cdic_; // 0x300000-0x303fff
+    chips::VmpegDevice vmpeg_; // 0xe00000-0xe3ffff, FMA/FMV registers
     dvc::DvcVideo dvc_video_;
     dvc::DvcAudio dvc_audio_;
 };

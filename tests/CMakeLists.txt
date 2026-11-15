@@ -5,7 +5,6 @@ add_library(zcdi_doctest INTERFACE)
 target_include_directories(zcdi_doctest SYSTEM INTERFACE ${zcdi_SOURCE_DIR}/third_party/doctest)
 target_include_directories(zcdi_doctest INTERFACE
     ${zcdi_SOURCE_DIR}/src
-    ${zcdi_SOURCE_DIR}/mamecdi
     ${zcdi_SOURCE_DIR}/third_party
     ${CMAKE_CURRENT_SOURCE_DIR}
 )

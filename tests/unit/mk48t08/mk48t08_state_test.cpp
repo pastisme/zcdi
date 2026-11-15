@@ -3,10 +3,10 @@
 #include <cstdint>
 #include <vector>
 
-#include "mk48t08/mk48t08.h"
+#include "chips/mk48t08/mk48t08.h"
 #include "support/state_roundtrip.h"
 
-using zcdi::mamecdi::Mk48t08;
+using zcdi::chips::Mk48t08;
 
 TEST_SUITE("mk48t08") {
 

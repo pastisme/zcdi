@@ -206,7 +206,7 @@ struct LicenseRow {
 
 constexpr LicenseRow kLicenses[] = {
     {"zcdi", "GPL-3.0-or-later"},
-    {"mamecdi (from MAME)", "BSD-3-Clause"},
+    {"src/chips (from MAME)", "BSD-3-Clause"},
     {"Musashi", "MIT"},
     {"libmpeg2", "GPL-2.0-or-later"},
     {"libchdr", "BSD-3-Clause"},
@@ -281,7 +281,7 @@ void DebuggerApp::draw_help_popups() {
             }
             ImGui::EndTable();
         }
-        ImGui::TextDisabled("Each licence text is in its directory under third_party/ and mamecdi/.");
+        ImGui::TextDisabled("Each licence text is in its directory under third_party/, and in src/chips/LICENSE-MAME.");
         end_help_popup();
     }
 

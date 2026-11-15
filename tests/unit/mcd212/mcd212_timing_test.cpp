@@ -4,14 +4,14 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "mcd212/mcd212.h"
+#include "chips/mcd212/mcd212.h"
 #include "support/mcd212_field.h"
 #include "support/mcd212_regs.h"
 
-using zcdi::mamecdi::Mcd212;
+using zcdi::chips::Mcd212;
 using zcdi_test::load_register;
 using zcdi_test::write_mmio16;
-using namespace zcdi::mamecdi::mcd212;
+using namespace zcdi::chips::mcd212;
 
 
 namespace {

@@ -3,9 +3,9 @@
 
 #include <cstdint>
 
-#include "vmpeg/vmpeg.h"
+#include "chips/vmpeg/vmpeg.h"
 
-using zcdi::mamecdi::VmpegDevice;
+using zcdi::chips::VmpegDevice;
 
 namespace {
 // kFmaDspa word index 0x1811 -> byte offset 0x3022/0x3023 (high/low).

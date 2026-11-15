@@ -1,20 +1,20 @@
 #include "widgets/devices_widget.h"
 
-#include "cdic/cdic.h"
+#include "chips/cdic/cdic.h"
+#include "chips/scc68070/scc68070.h"
+#include "chips/slave/slave.h"
+#include "chips/vmpeg/vmpeg.h"
 #include "core/machine_inspector.h"
 #include "disc/sector.h"
 #include "dvc/dvc_video.h"
 #include "imgui/imgui.h"
-#include "scc68070/scc68070.h"
-#include "slave/slave.h"
-#include "vmpeg/vmpeg.h"
 
 #include <cstdarg>
 #include <cstdio>
 
 namespace {
 
-using namespace zcdi::mamecdi::cdic;
+using namespace zcdi::chips::cdic;
 
 // One "name  value" row of the current two-column table.
 void field(const char* name, const char* fmt, ...) {
@@ -50,8 +50,8 @@ const char* cdic_command_name(uint16_t command) {
     }
 }
 
-void draw_cdic(const zcdi::mamecdi::Cdic& cdic) {
-    const zcdi::mamecdi::CdicSaveState& s = cdic.state();
+void draw_cdic(const zcdi::chips::Cdic& cdic) {
+    const zcdi::chips::CdicSaveState& s = cdic.state();
     int m = 0, sec = 0, f = 0;
     zcdi::lba_to_msf(s.curr_lba_, m, sec, f);
     if (ImGui::CollapsingHeader("Registers", ImGuiTreeNodeFlags_DefaultOpen) && begin_fields("cdic_regs")) {
@@ -88,9 +88,9 @@ void draw_cdic(const zcdi::mamecdi::Cdic& cdic) {
     }
 }
 
-void draw_vmpeg(const zcdi::mamecdi::VmpegDevice& vmpeg, const zcdi::dvc::DvcVideo& video, bool dvc_loaded) {
+void draw_vmpeg(const zcdi::chips::VmpegDevice& vmpeg, const zcdi::dvc::DvcVideo& video, bool dvc_loaded) {
     if (!dvc_loaded) ImGui::TextDisabled("No DVC cartridge ROM loaded");
-    const zcdi::mamecdi::VmpegSaveState& s = vmpeg.state();
+    const zcdi::chips::VmpegSaveState& s = vmpeg.state();
     if (ImGui::CollapsingHeader("FMV (video)", ImGuiTreeNodeFlags_DefaultOpen) && begin_fields("fmv")) {
         field("System command", "%04X", s.fmv_system_command_register_);
         field("Video command", "%04X", s.fmv_video_command_register_);
@@ -149,7 +149,7 @@ void draw_vmpeg(const zcdi::mamecdi::VmpegDevice& vmpeg, const zcdi::dvc::DvcVid
     }
 }
 
-void draw_dma_channel(const char* id, const zcdi::mamecdi::DmaChannel& ch) {
+void draw_dma_channel(const char* id, const zcdi::chips::DmaChannel& ch) {
     if (!begin_fields(id)) return;
     field("CSR / CER", "%02X / %02X", ch.csr, ch.cer);
     field("DCR / OCR / SCR / CCR", "%02X / %02X / %02X / %02X", ch.dcr, ch.ocr, ch.scr, ch.ccr);
@@ -158,8 +158,8 @@ void draw_dma_channel(const char* id, const zcdi::mamecdi::DmaChannel& ch) {
     ImGui::EndTable();
 }
 
-void draw_scc68070(const zcdi::mamecdi::Scc68070Periph& scc) {
-    const zcdi::mamecdi::Scc68070SaveState& s = scc.state();
+void draw_scc68070(const zcdi::chips::Scc68070Periph& scc) {
+    const zcdi::chips::Scc68070SaveState& s = scc.state();
     if (ImGui::CollapsingHeader("Interrupts", ImGuiTreeNodeFlags_DefaultOpen) && begin_fields("scc_irq")) {
         field("LIR", "%02X  (INT1 level %d)", s.lir_, (s.lir_ >> 4) & 7);
         field("PICR1", "%02X  (I2C %d, timer %d)", s.picr1_, (s.picr1_ >> 4) & 7, s.picr1_ & 7);
@@ -187,8 +187,8 @@ void draw_scc68070(const zcdi::mamecdi::Scc68070Periph& scc) {
     }
 }
 
-void draw_slave(const zcdi::mamecdi::SlaveHle& slave) {
-    const zcdi::mamecdi::SlaveSaveState& s = slave.state();
+void draw_slave(const zcdi::chips::SlaveHle& slave) {
+    const zcdi::chips::SlaveSaveState& s = slave.state();
     if (ImGui::CollapsingHeader("State", ImGuiTreeNodeFlags_DefaultOpen) && begin_fields("slave_state")) {
         field("IRQ2", "%s", yes(slave.irq2_asserted()));
         field("Tray open", "%s", yes(s.tray_open_));
@@ -198,14 +198,14 @@ void draw_slave(const zcdi::mamecdi::SlaveHle& slave) {
         static const char* const kTypes[] = {"none", "relative (M)", "maneuvering (J)", "absolute (T)", "absolute (S)"};
         const unsigned type = unsigned(s.front_type_);
         field("Front device", "%s%s  %s baud",
-              type <= unsigned(zcdi::mamecdi::FrontDeviceType::kAbsoluteScreen) ? kTypes[type] : "power-on",
+              type <= unsigned(zcdi::chips::FrontDeviceType::kAbsoluteScreen) ? kTypes[type] : "power-on",
               s.detect_ticks_ ? ", detecting" : "", s.sci_9600_ ? "9600" : "1200");
         static const char* const kPc6[] = {"released", "high", "low"};
         field("Back RTS (PC6)", "%s", kPc6[unsigned(s.pc6_)]);
         ImGui::EndTable();
     }
     if (ImGui::CollapsingHeader("Channels", ImGuiTreeNodeFlags_DefaultOpen) && begin_fields("slave_channels")) {
-        for (int c = 0; c < zcdi::mamecdi::slave::kNumChannels; ++c) {
+        for (int c = 0; c < zcdi::chips::slave::kNumChannels; ++c) {
             const auto& ch = s.channels_[c];
             char in[64]{};
             int at = 0;

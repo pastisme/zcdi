@@ -4,13 +4,13 @@
 #include <cstdint>
 #include <vector>
 
-#include "mcd212/mcd212.h"
+#include "chips/mcd212/mcd212.h"
 #include "support/mcd212_field.h"
 #include "support/private_access.h"
 #include "support/state_roundtrip.h"
 
-using zcdi::mamecdi::Mcd212;
-using zcdi::mamecdi::Mcd212SaveState;
+using zcdi::chips::Mcd212;
+using zcdi::chips::Mcd212SaveState;
 using zcdi_test::priv;
 
 ZCDI_PRIVATE_MEMBER(StateClut, Mcd212SaveState, clut_, uint32_t[256]);
