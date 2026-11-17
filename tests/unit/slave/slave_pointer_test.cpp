@@ -13,15 +13,10 @@ using zcdi::chips::FrontDeviceType;
 using zcdi::chips::Pc6;
 using zcdi::chips::SlaveHle;
 using zcdi_test::channel_addr;
+using zcdi_test::kOcTick;
+using zcdi_test::run;
 
 namespace {
-
-// One 8.19 ms output compare tick: 16 ticks of the 0.5 MHz counter's high byte.
-constexpr long kOcTick = 15000000L * 256 / 500000 * 16;
-
-void run(SlaveHle& s, long cycles) {
-    for (long done = 0; done < cycles; done += 1000) s.tick_cycles(1000);
-}
 
 // Waits out a detection cycle: RTS high, then low after 5 ticks.
 void finish_detection(SlaveHle& s) {

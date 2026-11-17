@@ -6,25 +6,14 @@
 #include "chips/mcd212/mcd212.h"
 #include "support/mcd212_field.h"
 #include "support/mcd212_regs.h"
-#include "support/private_access.h"
+#include "support/mcd212_private.h"
 
 using zcdi::chips::Mcd212;
+using zcdi_test::load_clut;
 using zcdi_test::load_register;
-using zcdi_test::priv;
+using zcdi_test::pixel;
 using zcdi_test::write_mmio16;
 using namespace zcdi::chips::mcd212;
-
-// The decoders and the mixer, tested on their own.
-ZCDI_PRIVATE_MEMBER(ClutPixel, Mcd212, clut_pixel, uint32_t(int, uint8_t, uint8_t) const);
-ZCDI_PRIVATE_MEMBER(PlaneTransparent, Mcd212, plane_transparent, bool(int, uint32_t, int) const);
-ZCDI_PRIVATE_MEMBER(ApplyPixelHold, Mcd212, apply_pixel_hold, void(int, uint32_t*, bool*, int) const);
-ZCDI_PRIVATE_MEMBER(DecodePlaneLine, Mcd212, decode_plane_line,
-                    void(int, const uint8_t*, std::size_t, uint32_t*, bool*));
-ZCDI_PRIVATE_MEMBER(PlaneParked, Mcd212, plane_parked, bool(int) const);
-ZCDI_PRIVATE_MEMBER(DecodeDoubleResLine, Mcd212, decode_double_res_line,
-                    void(int, const uint8_t*, std::size_t, uint32_t*, bool*));
-ZCDI_PRIVATE_MEMBER(CompositePixel, Mcd212, composite_pixel,
-                    uint32_t(uint32_t, bool, uint32_t, bool, uint8_t, uint8_t) const);
 
 namespace {
 
@@ -32,16 +21,6 @@ namespace {
 constexpr int kLineWidth = 384;
 constexpr int kFbWidth = 2 * kLineWidth;
 constexpr int kFbHeight = 280;  // one field; the buffer holds two, woven
-
-uint32_t fb_at(const Mcd212& mcd, int x, int y) {
-    return mcd.framebuffer()[static_cast<std::size_t>(y) * kFbWidth + x];
-}
-
-// CLUT entry `index` of `bank` (64 entries each), loaded through plane A.
-void load_clut(Mcd212& mcd, int bank, int index, uint32_t color) {
-    load_register(mcd, 0, kRegClutBank, uint32_t(bank));
-    load_register(mcd, 0, uint8_t(kRegClut + index), color);
-}
 
 }  // namespace
 
@@ -52,17 +31,17 @@ TEST_CASE("CM0=4 dual CLUT7 obeys ICM CS and CM1=4 is reserved") {
     load_clut(mcd, 0, 0x01, 0x00102030u);
     load_clut(mcd, 2, 0x01, 0x00405060u);
     load_register(mcd, 0, kRegImageCodingMethod, 0);
-    CHECK(priv<ClutPixel>(mcd, 0, 0x81, 0x4) == 0x00102030u);
+    CHECK(call_private::clut_pixel(mcd, 0, 0x81, 0x4) == 0x00102030u);
     load_register(mcd, 0, kRegImageCodingMethod, kIcmCs);
-    CHECK(priv<ClutPixel>(mcd, 0, 0x81, 0x4) == 0x00405060u);
-    CHECK(priv<ClutPixel>(mcd, 1, 0x81, 0x4) == 0);
+    CHECK(call_private::clut_pixel(mcd, 0, 0x81, 0x4) == 0x00405060u);
+    CHECK(call_private::clut_pixel(mcd, 1, 0x81, 0x4) == 0);
 }
 
 TEST_CASE("CM1=1 is RGB555 and never standalone CLUT8") {
     Mcd212 mcd;
     load_clut(mcd, 1, 0x02, 0x00a8ccecu);
-    CHECK(priv<ClutPixel>(mcd, 0, 0x42, 0x1) == 0x00a8ccecu);
-    CHECK(priv<ClutPixel>(mcd, 1, 0x42, 0x1) == 0x00101010u);
+    CHECK(call_private::clut_pixel(mcd, 0, 0x42, 0x1) == 0x00a8ccecu);
+    CHECK(call_private::clut_pixel(mcd, 1, 0x42, 0x1) == 0x00101010u);
 }
 
 TEST_CASE("a Color-Key mask bit makes its RGB bit don't-care") {
@@ -71,8 +50,8 @@ TEST_CASE("a Color-Key mask bit makes its RGB bit don't-care") {
     load_register(mcd, 0, kRegTransparencyControl, kTcrKey);  // plane A: Color Key true
     load_register(mcd, 0, kRegTransparentColorA, 0x00102030u);
     load_register(mcd, 0, kRegMaskColorA, 0x00040000u);       // ignore one red bit
-    CHECK(priv<PlaneTransparent>(mcd, 0, 0x00142030u, 0));
-    CHECK(priv<PlaneTransparent>(mcd, 0, 0x00102030u, 0));
+    CHECK(call_private::plane_transparent(mcd, 0, 0x00142030u, 0));
+    CHECK(call_private::plane_transparent(mcd, 0, 0x00102030u, 0));
 }
 
 TEST_CASE("pixel hold repeats colour and opacity together") {
@@ -87,7 +66,7 @@ TEST_CASE("pixel hold repeats colour and opacity together") {
     opaque[0] = true;
     opaque[2] = true;
     load_register(mcd, 0, kRegPixelHoldA, kPixelHoldEnable | 2);
-    priv<ApplyPixelHold>(mcd, 0, row, opaque, kLineWidth);
+    call_private::apply_pixel_hold(mcd, 0, row, opaque, kLineWidth);
     CHECK(row[0] == 0x11u);
     CHECK(row[1] == 0x11u);
     CHECK(row[2] == 0x33u);
@@ -110,7 +89,7 @@ TEST_CASE("CLUT4 and RL3 decode two pixels per byte") {
     SUBCASE("CLUT4 bitmap") {
         plane[0x100] = 0x12;
         plane[0x101] = 0xef;
-        priv<DecodeDoubleResLine>(mcd, 0, plane, sizeof(plane), row, opaque);
+        call_private::decode_double_res_line(mcd, 0, plane, sizeof(plane), row, opaque);
         CHECK(row[0] == 0x00040404u);
         CHECK(row[1] == 0x00080808u);
         CHECK(row[2] == 0x00383838u);
@@ -124,7 +103,7 @@ TEST_CASE("CLUT4 and RL3 decode two pixels per byte") {
         plane[0x102] = 0x3c;       // literal: bit 3 of the low pixel is dropped
         plane[0x103] = 0x80;       // run of 0 to end of line
         plane[0x104] = 0x00;
-        priv<DecodeDoubleResLine>(mcd, 0, plane, sizeof(plane), row, opaque);
+        call_private::decode_double_res_line(mcd, 0, plane, sizeof(plane), row, opaque);
         CHECK(row[0] == 0x00040404u);
         CHECK(row[1] == 0x00080808u);
         CHECK(row[2] == 0x00040404u);
@@ -142,7 +121,7 @@ TEST_CASE("two opaque planes mix with one black-level pedestal") {
     load_register(mcd, 0, kRegTransparencyControl, 0);  // mixing enabled
     // ICF' 63 is a factor of 1: weighted_a = 150-16 = 134, weighted_b =
     // 100-16 = 84; sum = 134 + 84 + 16 = 234 = 0xea per channel.
-    CHECK(priv<CompositePixel>(mcd, 0x00969696u, true, 0x00646464u, true, uint8_t(63), uint8_t(63)) ==
+    CHECK(call_private::composite_pixel(mcd, 0x00969696u, true, 0x00646464u, true, uint8_t(63), uint8_t(63)) ==
           0x00eaeaeau);
 }
 
@@ -152,7 +131,7 @@ TEST_CASE("a transparent plane contributes nothing to the mix") {
     load_register(mcd, 0, kRegTransparencyControl, 0);
     // weighted_a = 134; b's term is gated to 0 despite color_b being bright;
     // sum = 134 + 0 + 16 = 150 = 0x96 per channel.
-    CHECK(priv<CompositePixel>(mcd, 0x00969696u, true, 0x00ffffffu, false, uint8_t(63), uint8_t(63)) ==
+    CHECK(call_private::composite_pixel(mcd, 0x00969696u, true, 0x00ffffffu, false, uint8_t(63), uint8_t(63)) ==
           0x00969696u);
 }
 
@@ -160,12 +139,12 @@ TEST_CASE("a transparent plane contributes nothing to the mix") {
 TEST_CASE("below-black components contribute negatively to the mix") {
     Mcd212 mcd;
     load_register(mcd, 0, kRegTransparencyControl, 0);
-    CHECK(priv<CompositePixel>(mcd, 0x00202020u, true, 0x00020202u, true, uint8_t(63), uint8_t(63)) ==
+    CHECK(call_private::composite_pixel(mcd, 0x00202020u, true, 0x00020202u, true, uint8_t(63), uint8_t(63)) ==
           0x00121212u);
     // Full ICF shows a lone plane's decoded color unchanged, below black too.
-    CHECK(priv<CompositePixel>(mcd, 0x00080808u, true, 0, false, uint8_t(63), uint8_t(63)) == 0x00080808u);
+    CHECK(call_private::composite_pixel(mcd, 0x00080808u, true, 0, false, uint8_t(63), uint8_t(63)) == 0x00080808u);
     // Clipped at 0, not wrapped.
-    CHECK(priv<CompositePixel>(mcd, 0x00000000u, true, 0x00000000u, true, uint8_t(63), uint8_t(63)) == 0);
+    CHECK(call_private::composite_pixel(mcd, 0x00000000u, true, 0x00000000u, true, uint8_t(63), uint8_t(63)) == 0);
 }
 
 // No DVC video under a visible cursor pixel. 16x16
@@ -201,10 +180,10 @@ TEST_CASE("the cursor is drawn over DVC video") {
         for (int t = 1; t <= 12; ++t) {
             zcdi_test::run_field(mcd, planes[0], planes[1], sizeof(planes[0]));
             if (t == 1) {
-                at_tick1 = fb_at(mcd, 210, 105);
-                CHECK(fb_at(mcd, 50, 50) == kVideoGreen);  // video shows outside the cursor
+                at_tick1 = pixel(mcd, 210, 105);
+                CHECK(pixel(mcd, 50, 50) == kVideoGreen);  // video shows outside the cursor
             }
-            if (t == 12) at_tick12 = fb_at(mcd, 210, 105);
+            if (t == 12) at_tick12 = pixel(mcd, 210, 105);
         }
     };
 
@@ -232,7 +211,7 @@ TEST_CASE("DVC video needs a latched window and Show") {
     for (std::size_t i = 0; i < sizeof(video); i += 4) {
         video[i] = 0x00; video[i + 1] = 0xc8; video[i + 2] = 0x00; video[i + 3] = 0xff;
     }
-    auto pixel = [&](uint16_t win_w, uint16_t win_h, bool show, int x, int y, bool attached = true) {
+    auto shown = [&](uint16_t win_w, uint16_t win_h, bool show, int x, int y, bool attached = true) {
         Mcd212 mcd;
         load_register(mcd, 0, kRegBackdropColor, 0xc);
         mcd.set_dvc_attached(attached);
@@ -241,17 +220,17 @@ TEST_CASE("DVC video needs a latched window and Show") {
         load_register(mcd, 0, kRegImageCodingMethod, kIcmEv);
         write_mmio16(mcd, kDcr1, kDcrDe);
         zcdi_test::run_field(mcd, planes[0], planes[1], sizeof(planes[0]));
-        return fb_at(mcd, x, y);
+        return zcdi_test::pixel(mcd, x, y);
     };
     // Normal Resolution placement, so x is doubled in the framebuffer.
-    CHECK(pixel(32, 16, true, 2 * 10, 20) == kVideoGreen);
-    CHECK(pixel(32, 16, true, 2 * 10 - 1, 20) == kBlack);  // left of the window
-    CHECK(pixel(8, 4, true, 2 * 18, 20) == kBlack);        // past the window width
-    CHECK(pixel(32, 16, false, 2 * 10, 20) == kBlack);     // Hide
-    CHECK(pixel(0, 0, true, 0, 0) == kBlack);              // window never latched
-    CHECK(pixel(0, 0, true, 2 * 10, 20) == kBlack);
+    CHECK(shown(32, 16, true, 2 * 10, 20) == kVideoGreen);
+    CHECK(shown(32, 16, true, 2 * 10 - 1, 20) == kBlack);  // left of the window
+    CHECK(shown(8, 4, true, 2 * 18, 20) == kBlack);        // past the window width
+    CHECK(shown(32, 16, false, 2 * 10, 20) == kBlack);     // Hide
+    CHECK(shown(0, 0, true, 0, 0) == kBlack);              // window never latched
+    CHECK(shown(0, 0, true, 2 * 10, 20) == kBlack);
     // No cartridge: the backdrop stays.
-    CHECK(pixel(32, 16, true, 2 * 10, 20, /*attached=*/false) == kBackdropRed);
+    CHECK(shown(32, 16, true, 2 * 10, 20, /*attached=*/false) == kBackdropRed);
 }
 
 // With the VCD pixel clock each output tick averages its sample
@@ -273,7 +252,7 @@ TEST_CASE("VCD pixel clock video is averaged over 4 ticks") {
         mcd.set_dvc_window(scrpos_x, 20, 32, 16, 0, 0, /*show=*/true, /*vcd_pixel_clock=*/true);
         load_register(mcd, 0, kRegImageCodingMethod, kIcmEv);
         zcdi_test::run_field(mcd, planes[0], planes[1], sizeof(planes[0]));
-        return fb_at(mcd, 2 * scrpos_x + c, 20);
+        return pixel(mcd, 2 * scrpos_x + c, 20);
     };
     // Sample 16 starts at tick 71 (71 * 231 / 1024); column c ends at tick 2c.
     fill(/*step=*/true);
@@ -292,7 +271,7 @@ TEST_CASE("mixing with both planes transparent shows the backdrop") {
     Mcd212 mcd;
     load_register(mcd, 0, kRegTransparencyControl, 0);  // mixing enabled
     load_register(mcd, 0, kRegBackdropColor, 0xc);      // k4bppColor[0xc], red
-    CHECK(priv<CompositePixel>(mcd, 0x00969696u, false, 0x00646464u, false, uint8_t(63), uint8_t(63)) ==
+    CHECK(call_private::composite_pixel(mcd, 0x00969696u, false, 0x00646464u, false, uint8_t(63), uint8_t(63)) ==
           0x00e61010u);
 }
 
@@ -302,10 +281,10 @@ TEST_CASE("inverted Color Key on a DYUV plane is opaque") {
     load_register(mcd, 0, kRegTransparencyControl, kTcrNotKey);
     load_register(mcd, 0, kRegTransparentColorA, 0x00fc0000u);
     load_register(mcd, 0, kRegImageCodingMethod, kIcmDyuv);
-    CHECK_FALSE(priv<PlaneTransparent>(mcd, 0, 0x00123456u, 0));
+    CHECK_FALSE(call_private::plane_transparent(mcd, 0, 0x00123456u, 0));
     load_register(mcd, 0, kRegImageCodingMethod, kIcmClut7);  // transparent unless the key matches
-    CHECK(priv<PlaneTransparent>(mcd, 0, 0x00123456u, 0));
-    CHECK_FALSE(priv<PlaneTransparent>(mcd, 0, 0x00ff0000u, 0));
+    CHECK(call_private::plane_transparent(mcd, 0, 0x00123456u, 0));
+    CHECK_FALSE(call_private::plane_transparent(mcd, 0, 0x00ff0000u, 0));
 }
 
 // IC clear makes a plane transparent. OFF or VSR 0 drives black that only Always or a region flag keys away.
@@ -318,13 +297,13 @@ TEST_CASE("a parked plane is black, transparent only with IC clear") {
     uint32_t row[kLineWidth];
     bool present[kLineWidth];
     write_mmio16(mcd, kDcr1, kDcrIc);  // VSR 0
-    priv<DecodePlaneLine>(mcd, 0, plane, sizeof(plane), row, present);
+    call_private::decode_plane_line(mcd, 0, plane, sizeof(plane), row, present);
     CHECK(row[0] == 0x00101010u);
     CHECK(present[0]);
-    CHECK(priv<PlaneParked>(mcd, 0));
+    CHECK(call_private::plane_parked(mcd, 0));
     write_mmio16(mcd, kDcr1, 0);  // IC clear
     write_mmio16(mcd, kVsr1, 0x100);
-    priv<DecodePlaneLine>(mcd, 0, plane, sizeof(plane), row, present);
+    call_private::decode_plane_line(mcd, 0, plane, sizeof(plane), row, present);
     CHECK_FALSE(present[0]);
 }
 

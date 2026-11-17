@@ -15,6 +15,7 @@ using zcdi::chips::Mcd212;
 using zcdi_test::load_register;
 using zcdi_test::write_mmio16;
 using namespace zcdi::chips::mcd212;
+using zcdi_test::pixel;
 using zcdi_test::run_field;
 
 namespace {
@@ -39,10 +40,6 @@ int field(Mcd212& mcd, Planes& p, int lines = kPalLines) {
 // IT1, cleared by the read: the 0x404 list ran.
 bool even_list_ran(Mcd212& mcd) { return (mcd.read_byte(kCsr2R) & 0x04) != 0; }
 bool pa(Mcd212& mcd) { return (mcd.read_byte(kCsr1R) & 0x20) != 0; }
-
-uint32_t pixel(const Mcd212& mcd, int x, int row) {
-    return mcd.framebuffer()[static_cast<std::size_t>(row) * kFbWidth + x];
-}
 
 struct Pictures {
     std::vector<uint8_t> red = std::vector<uint8_t>(kLineWidth * kFbHeight * 4), blue = red;

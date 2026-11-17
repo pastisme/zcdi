@@ -81,4 +81,17 @@ TEST_CASE("audio without a pack header is an elementary stream after 64 sectors"
           std::vector<uint8_t>(zcdi_test::kDvcMp2FixtureBytes, zcdi_test::kDvcMp2FixtureBytes + 4));
 }
 
+// ISO 11172-1 2.4.3.3: '01', then the STD buffer scale and size, before any timestamp.
+TEST_CASE("a PES header's STD buffer field is skipped") {
+    const std::vector<uint8_t> payload = {0x00, 0x00, 0x01, 0xb3, 0x11, 0x22, 0x33};  // an even stream: whole DMA words
+    std::vector<uint8_t> stream = {0x00, 0x00, 0x01, 0xba, 0x21, 0x00, 0x01, 0x00, 0x01, 0x80, 0x00, 0x01};
+    const size_t length = 2 + 5 + payload.size();
+    stream.insert(stream.end(), {0x00, 0x00, 0x01, 0xe0, uint8_t(length >> 8), uint8_t(length)});
+    stream.insert(stream.end(), {0x60, 0x2e});                    // STD buffer: scale 1, size 46 KB
+    stream.insert(stream.end(), {0x21, 0x00, 0x01, 0x00, 0x01});  // PTS
+    stream.insert(stream.end(), payload.begin(), payload.end());
+    VmpegFeed feed;
+    CHECK(feed.push(stream.data(), stream.size()) == payload);
+}
+
 }  // TEST_SUITE

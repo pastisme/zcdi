@@ -12,6 +12,7 @@ is in its directory or file headers.
 | `libretro/` | [libretro-common](https://github.com/libretro/libretro-common) | MIT | No       |
 | `playcdi/`  | CD-i Fan's playcdi, via [CDi_MiSTer](https://github.com/MiSTer-devel/CDi_MiSTer) | LGPL-2.0-or-later | No |
 | `doctest/`  | [doctest](https://github.com/doctest/doctest) (tests only) | MIT     | No            |
+| `access_private/` | [access_private](https://github.com/martong/access_private) at `9e47d135`, `access_private.hpp` only (tests only) | MIT | No; included through `tests/support/access_private.h` (it has no include guard) |
 
 Local changes are marked inline with `zcdi` comments; keep them when
 updating from upstream.

@@ -1,48 +1,20 @@
 #include "doctest.h"
 
-#include <cstdio>
-#include <cstring>
 #include <memory>
 
 #include "disc/chd_disc.h"
 #include "fixtures/chd_postgap_fixture.h"
 #include "fixtures/chd_subcode_rw_fixture.h"
 #include "fixtures/chd_two_track_fixture.h"
+#include "support/mem_files.h"
 
 using namespace zcdi;
 
 namespace {
 
-struct MemFile {
-    const uint8_t* data;
-    size_t size;
-    size_t pos = 0;
-};
-
 template <size_t N>
 std::unique_ptr<DiscContext> fixture_context(const uint8_t (&bytes)[N]) {
-    auto ctx = std::make_unique<DiscContext>("fixture.chd");
-    ctx->open_read = [&bytes](const std::string&) -> DiscContext::Handle { return new MemFile{bytes, N}; };
-    ctx->read = [](DiscContext::Handle h, void* dst, size_t len) -> size_t {
-        auto* f = static_cast<MemFile*>(h);
-        size_t n = len < f->size - f->pos ? len : f->size - f->pos;
-        std::memcpy(dst, f->data + f->pos, n);
-        f->pos += n;
-        return n;
-    };
-    ctx->seek = [](DiscContext::Handle h, int64_t offset, int whence) -> int {
-        auto* f = static_cast<MemFile*>(h);
-        int64_t base = whence == SEEK_SET ? 0 : whence == SEEK_CUR ? int64_t(f->pos) : int64_t(f->size);
-        if (base + offset < 0 || base + offset > int64_t(f->size)) return -1;
-        f->pos = size_t(base + offset);
-        return 0;
-    };
-    ctx->size = [](DiscContext::Handle h) -> uint64_t { return static_cast<MemFile*>(h)->size; };
-    ctx->close = [](DiscContext::Handle h) -> int {
-        delete static_cast<MemFile*>(h);
-        return 0;
-    };
-    return ctx;
+    return zcdi_test::memory_context("fixture.chd", {{"fixture.chd", zcdi_test::bytes_of(bytes)}});
 }
 
 }  // namespace

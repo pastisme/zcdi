@@ -1,6 +1,8 @@
 #include "doctest.h"
 
+#include <algorithm>
 #include <cstdint>
+#include <span>
 #include <memory>
 #include <vector>
 
@@ -109,6 +111,18 @@ TEST_CASE("the reported state size follows the frontend's variable-size support"
         CHECK(r.report(big) == big);
         CHECK(r.report(1000) == big);
     }
+}
+
+TEST_CASE("a state saved into the frontend's buffer is the same bytes, and a short buffer fails") {
+    Core c;
+    c.advance(100);
+    const std::vector<uint8_t> state = c.save();
+    std::vector<uint8_t> buffer(state.size() + 64, 0xee);
+    CHECK(zcdi::save_core_state(*c.machine, c.audio, c.input, std::span<uint8_t>(buffer)) == state.size());
+    CHECK(std::equal(state.begin(), state.end(), buffer.begin()));
+
+    std::vector<uint8_t> short_buffer(state.size() - 1);
+    CHECK(zcdi::save_core_state(*c.machine, c.audio, c.input, std::span<uint8_t>(short_buffer)) == 0);
 }
 
 }  // TEST_SUITE

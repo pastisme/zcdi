@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -62,5 +63,10 @@ public:
 private:
     std::vector<uint8_t> submodes_;
 };
+
+// `sectors` real-time data sectors from LBA 0.
+inline std::unique_ptr<zcdi::Disc> data_disc(int sectors = 40) {
+    return std::make_unique<FakeDisc>(std::vector<uint8_t>(std::size_t(sectors), kSubmodeData));
+}
 
 }  // namespace zcdi_test

@@ -10,17 +10,13 @@
 
 using zcdi::chips::Mcd212;
 using zcdi_test::load_register;
+using zcdi_test::put32;
 using zcdi_test::write_mmio16;
 using namespace zcdi::chips::mcd212;
-
 
 namespace {
 
 constexpr int kPalLines = 312, kFirstActive = 26, kActive = 280;  // PAL, 280 lines
-
-void put32(uint8_t* p, uint32_t v) {
-    p[0] = uint8_t(v >> 24); p[1] = uint8_t(v >> 16); p[2] = uint8_t(v >> 8); p[3] = uint8_t(v);
-}
 
 bool display_active(Mcd212& mcd) { return (mcd.read_byte(kCsr1R) & 0x80) != 0; }
 

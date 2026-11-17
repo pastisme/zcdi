@@ -4,9 +4,7 @@
 #include <cstdint>
 
 #include "chips/mcd212/mcd212.h"
-#include "support/private_access.h"
-
-ZCDI_PRIVATE_MEMBER(Mcd212SetRegister, zcdi::chips::Mcd212, set_register, void(int, uint8_t, uint32_t));
+#include "support/mcd212_private.h"
 
 namespace zcdi_test {
 
@@ -18,7 +16,13 @@ inline void write_mmio16(zcdi::chips::Mcd212& mcd, uint32_t offset, uint16_t val
 
 // As an ICA/DCA LOAD instruction on `path` (0 = plane A) would.
 inline void load_register(zcdi::chips::Mcd212& mcd, int path, uint8_t reg, uint32_t value) {
-    priv<Mcd212SetRegister>(mcd, path, reg, value);
+    call_private::set_register(mcd, path, reg, value);
+}
+
+// CLUT entry `index` of `bank` (64 entries each), loaded through plane A.
+inline void load_clut(zcdi::chips::Mcd212& mcd, int bank, int index, uint32_t color) {
+    load_register(mcd, 0, zcdi::chips::mcd212::kRegClutBank, uint32_t(bank));
+    load_register(mcd, 0, uint8_t(zcdi::chips::mcd212::kRegClut + index), color);
 }
 
 }  // namespace zcdi_test

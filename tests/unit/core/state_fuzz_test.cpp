@@ -19,7 +19,7 @@ TEST_CASE("a state with a damaged field is rejected, or loads into a machine tha
     const std::array<std::byte, 16> dvc_rom{};
     const std::vector<std::byte> bios = zcdi_test::fake_bios();
     auto m = std::make_unique<zcdi::Machine>(bios, zcdi::VideoStandard::kPal, zcdi::Machine::InitParams{.dvc = dvc_rom});
-    m->mount_disc(std::make_unique<zcdi_test::FakeDisc>(std::vector<uint8_t>(40, zcdi_test::kSubmodeData)));
+    m->mount_disc(zcdi_test::data_disc());
     m->cold_boot();
     m->plug(zcdi::Socket::kFront, zcdi::DeviceId::kManeuvering);
     for (int i = 0; i < 3; ++i) m->run_frame();

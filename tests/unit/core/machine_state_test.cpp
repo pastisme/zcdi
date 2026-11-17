@@ -15,21 +15,12 @@
 #include "support/state_roundtrip.h"
 
 using zcdi_test::build_fake_machine;
+using zcdi_test::build_fake_machine_with;
+using zcdi_test::data_disc;
 using zcdi_test::load_machine;
 using zcdi_test::save_machine;
 
 namespace {
-
-std::unique_ptr<zcdi::Machine> build_fake_machine_with(const zcdi::Machine::InitParams& params) {
-    std::unique_ptr<zcdi::Machine> m =
-        std::make_unique<zcdi::Machine>(zcdi_test::fake_bios(), zcdi::VideoStandard::kPal, params);
-    m->cold_boot();
-    return m;
-}
-
-std::unique_ptr<zcdi::Disc> fake_disc() {
-    return std::make_unique<zcdi_test::FakeDisc>(std::vector<uint8_t>(40, zcdi_test::kSubmodeData));
-}
 
 // Breaks the MCD212 section tag: deep inside the machine, past the identity
 // checks, before NVRAM.
@@ -183,7 +174,7 @@ TEST_CASE("restoring the same state again and again replays the same frames") {
 
 TEST_CASE("a machine state made with another disc is rejected") {
     std::unique_ptr<zcdi::Machine> m = build_fake_machine();
-    REQUIRE(m->mount_disc(fake_disc()));
+    REQUIRE(m->mount_disc(data_disc()));
     m->run_frame();
     const std::vector<uint8_t> state = save_machine(*m);
 
@@ -229,12 +220,12 @@ TEST_CASE("a machine state made with the same disc and DVC ROM and Auto Play on 
     std::vector<uint8_t> state;
     {
         std::unique_ptr<zcdi::Machine> a = build_fake_machine_with(params);
-        REQUIRE(a->mount_disc(fake_disc()));
+        REQUIRE(a->mount_disc(data_disc()));
         a->run_frame();
         state = save_machine(*a);
     }
     std::unique_ptr<zcdi::Machine> b = build_fake_machine_with(params);
-    REQUIRE(b->mount_disc(fake_disc()));
+    REQUIRE(b->mount_disc(data_disc()));
     b->run_frame();
     REQUIRE(load_machine(*b, state));
     CHECK(zcdi_test::first_difference(save_machine(*b), state) == -1);

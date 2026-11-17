@@ -1,22 +1,18 @@
 #include "doctest.h"
 
-#include <cstdio>
 #include <cstring>
-#include <map>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "disc/raw2352_disc.h"
+#include "support/mem_files.h"
 
 using namespace zcdi;
+using zcdi_test::MemFiles;
+using zcdi_test::memory_context;
 
 namespace {
-
-struct MemFile {
-    const std::vector<uint8_t>* data = nullptr;
-    size_t pos = 0;
-};
 
 // Frame i of a file is marked with first_mark + i in its first and last byte.
 std::vector<uint8_t> marked_frames(int frames, int first_mark) {
@@ -26,37 +22,6 @@ std::vector<uint8_t> marked_frames(int frames, int first_mark) {
         data[size_t(i + 1) * kRawSectorSize - 1] = uint8_t(first_mark + i);
     }
     return data;
-}
-
-// The files outlive the disc: they are owned by the test case.
-std::unique_ptr<DiscContext> memory_context(const std::string& path,
-                                            const std::map<std::string, std::vector<uint8_t>>& files) {
-    auto ctx = std::make_unique<DiscContext>(path);
-    ctx->open_read = [&files](const std::string& p) -> DiscContext::Handle {
-        auto it = files.find(p);
-        return it == files.end() ? nullptr : new MemFile{&it->second};
-    };
-    ctx->read = [](DiscContext::Handle h, void* dst, size_t len) -> size_t {
-        auto* f = static_cast<MemFile*>(h);
-        size_t n = len < f->data->size() - f->pos ? len : f->data->size() - f->pos;
-        std::memcpy(dst, f->data->data() + f->pos, n);
-        f->pos += n;
-        return n;
-    };
-    ctx->seek = [](DiscContext::Handle h, int64_t offset, int whence) -> int {
-        auto* f = static_cast<MemFile*>(h);
-        int64_t size = int64_t(f->data->size());
-        int64_t base = whence == SEEK_SET ? 0 : whence == SEEK_CUR ? int64_t(f->pos) : size;
-        if (base + offset < 0 || base + offset > size) return -1;
-        f->pos = size_t(base + offset);
-        return 0;
-    };
-    ctx->size = [](DiscContext::Handle h) -> uint64_t { return static_cast<MemFile*>(h)->data->size(); };
-    ctx->close = [](DiscContext::Handle h) -> int {
-        delete static_cast<MemFile*>(h);
-        return 0;
-    };
-    return ctx;
 }
 
 int mark_at(Disc& disc, int lba) {
@@ -70,7 +35,7 @@ int mark_at(Disc& disc, int lba) {
 TEST_SUITE("disc") {
 
 TEST_CASE("one .bin per track: the files are laid end to end") {
-    std::map<std::string, std::vector<uint8_t>> files;
+    MemFiles files;
     const std::string cue =
         "FILE \"t1.bin\" BINARY\n"
         "  TRACK 01 MODE2/2352\n"
@@ -107,7 +72,7 @@ TEST_CASE("one .bin per track: the files are laid end to end") {
 }
 
 TEST_CASE("a FILE path is relative to the cue unless absolute") {
-    std::map<std::string, std::vector<uint8_t>> files;
+    MemFiles files;
     std::string name;
     std::string bin;
     SUBCASE("same directory") {
@@ -136,7 +101,7 @@ TEST_CASE("a FILE path is relative to the cue unless absolute") {
 }
 
 TEST_CASE("a cue whose FILE path doesn't exist is rejected even with the bin next to it") {
-    std::map<std::string, std::vector<uint8_t>> files;
+    MemFiles files;
     std::string name;
     SUBCASE("missing subdirectory") { name = "tracks/game.bin"; }
     SUBCASE("stale absolute Windows path") { name = "C:\\cdi\\games\\game.bin"; }
@@ -147,7 +112,7 @@ TEST_CASE("a cue whose FILE path doesn't exist is rejected even with the bin nex
 }
 
 TEST_CASE("single .bin: track 1's INDEX 01 is LBA 0, later tracks by INDEX 01") {
-    std::map<std::string, std::vector<uint8_t>> files;
+    MemFiles files;
     const std::string cue =
         "FILE \"disc.bin\" BINARY\n"
         "  TRACK 01 MODE2/2352\n"
@@ -171,7 +136,7 @@ TEST_CASE("single .bin: track 1's INDEX 01 is LBA 0, later tracks by INDEX 01") 
 }
 
 TEST_CASE("PREGAP adds frames that read as zeros") {
-    std::map<std::string, std::vector<uint8_t>> files;
+    MemFiles files;
     const std::string cue =
         "FILE \"a.bin\" BINARY\n"
         "  TRACK 01 MODE2/2352\n"
@@ -197,7 +162,7 @@ TEST_CASE("PREGAP adds frames that read as zeros") {
 }
 
 TEST_CASE("CD-i Ready: LBA 0 is the file start, in track 1's pregap") {
-    std::map<std::string, std::vector<uint8_t>> files;
+    MemFiles files;
     const std::string cue =
         "FILE \"ready.bin\" BINARY\n"
         "  TRACK 01 AUDIO\n"
@@ -232,7 +197,7 @@ TEST_CASE("CD-i Ready: LBA 0 is the file start, in track 1's pregap") {
 }
 
 TEST_CASE("cues that aren't raw 2352-byte data are rejected") {
-    std::map<std::string, std::vector<uint8_t>> files;
+    MemFiles files;
     files["a.bin"] = marked_frames(3, 1);
     SUBCASE("WAVE file") {
         const std::string cue = "FILE \"a.bin\" WAVE\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n";
@@ -251,7 +216,7 @@ TEST_CASE("cues that aren't raw 2352-byte data are rejected") {
 }
 
 TEST_CASE("bare .bin/.iso: a 2048-byte ISO9660 image is rejected by its missing sync") {
-    std::map<std::string, std::vector<uint8_t>> files;
+    MemFiles files;
     // 147 ISO sectors are 128 raw frames: the size check alone passes.
     files["game.iso"] = std::vector<uint8_t>(size_t(147) * 2048, 0);
     REQUIRE(files["game.iso"].size() % kRawSectorSize == 0);

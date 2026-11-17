@@ -8,16 +8,8 @@
 #include "support/state_roundtrip.h"
 
 using zcdi_test::channel_addr;
-
-namespace {
-
-constexpr long kOcTick = 15000000L * 256 / 500000 * 16;
-
-void run(zcdi::chips::SlaveHle& s, long cycles) {
-    for (long done = 0; done < cycles; done += 1000) s.tick_cycles(1000);
-}
-
-}  // namespace
+using zcdi_test::kOcTick;
+using zcdi_test::run;
 
 TEST_SUITE("slave") {
 

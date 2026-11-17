@@ -119,4 +119,12 @@ TEST_CASE("a device idle after a packet restores") {
     CHECK(run(b, 6) == run(a, 6));
 }
 
+TEST_CASE("an analog stick's step wins over the D-pad and is sent every packet") {
+    PointingDevice p(DeviceId::kManeuvering);
+    identify(p);
+    p.set_input({.right = true, .analog_dx = 5, .analog_dy = -3});
+    // y -3 is 0xfd: bits 7-6 in the first byte, 5-0 in the third.
+    CHECK(run(p, 6) == std::vector<int>{0xcc, 0x85, 0xbd, 0xcc, 0x85, 0xbd});
+}
+
 }  // TEST_SUITE

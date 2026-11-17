@@ -64,7 +64,6 @@ constexpr uint32_t kBootCount = 0x00002000;  // bumped by every boot of exit_bio
 // First boot asks the SLAVE for a reset (0x8a on channel 2) and spins, as the
 // real BIOS does at 0x400636; main RAM keeps the boot count.
 std::vector<std::byte> exit_bios() {
-    std::vector<std::byte> rom(0x80000, std::byte{0});
     const uint8_t code[] = {
         0x00, 0x07, 0x00, 0x00,                          // reset SSP $70000
         0x00, 0x40, 0x00, 0x08,                          // reset PC $400008
@@ -74,8 +73,7 @@ std::vector<std::byte> exit_bios() {
         0x13, 0xfc, 0x00, 0x8a, 0x00, 0x31, 0x00, 0x05,  // move.b #$8a,$310005
         0x60, 0xfe,                                      // spin: bra.s spin
     };
-    for (size_t i = 0; i < sizeof(code); ++i) rom[i] = std::byte{code[i]};
-    return rom;
+    return zcdi_test::bios_with_program(code);
 }
 
 }  // namespace
@@ -88,8 +86,7 @@ TEST_CASE("a SLAVE reset request resets the machine and turns Auto Play off") {
     std::unique_ptr<zcdi::Machine> m = std::make_unique<zcdi::Machine>(bios, zcdi::VideoStandard::kPal,
                                         zcdi::Machine::InitParams{.auto_play = true});
     m->cold_boot();
-    REQUIRE(m->mount_disc(std::make_unique<zcdi_test::FakeDisc>(
-        std::vector<uint8_t>(40, zcdi_test::kSubmodeData))));
+    REQUIRE(m->mount_disc(zcdi_test::data_disc()));
     REQUIRE(board(*m).playcdi_overlay_active());
 
     for (int i = 0; i < 3; ++i) m->run_frame();
@@ -167,8 +164,7 @@ TEST_CASE("NVRAM keeps its address and contents across a cold boot and a reset")
 
 TEST_CASE("a reset and a cold boot keep the mounted disc readable") {
     std::unique_ptr<zcdi::Machine> m = build_fake_machine();
-    REQUIRE(m->mount_disc(std::make_unique<zcdi_test::FakeDisc>(
-        std::vector<uint8_t>(40, zcdi_test::kSubmodeData))));
+    REQUIRE(m->mount_disc(zcdi_test::data_disc()));
     const int before = read_first_sector_marker(*m);
     REQUIRE(before >= zcdi_test::FakeDisc::marker(0));
     REQUIRE(before < zcdi_test::FakeDisc::marker(40));
@@ -185,8 +181,7 @@ TEST_CASE("a reset and a cold boot keep the mounted disc readable") {
 
 TEST_CASE("an open tray keeps the disc from the CDIC until it closes or the machine resets") {
     std::unique_ptr<zcdi::Machine> m = build_fake_machine();
-    REQUIRE(m->mount_disc(std::make_unique<zcdi_test::FakeDisc>(
-        std::vector<uint8_t>(40, zcdi_test::kSubmodeData))));
+    REQUIRE(m->mount_disc(zcdi_test::data_disc()));
     m->set_tray_open(true);
     CHECK(m->tray_open());
     CHECK(read_first_sector_marker(*m) == -1);
@@ -199,8 +194,7 @@ TEST_CASE("an open tray keeps the disc from the CDIC until it closes or the mach
 
 TEST_CASE("a state saved with the tray open loads with it open") {
     std::unique_ptr<zcdi::Machine> m = build_fake_machine();
-    REQUIRE(m->mount_disc(std::make_unique<zcdi_test::FakeDisc>(
-        std::vector<uint8_t>(40, zcdi_test::kSubmodeData))));
+    REQUIRE(m->mount_disc(zcdi_test::data_disc()));
     m->set_tray_open(true);
     const std::vector<uint8_t> open_state = save_machine(*m);
     m->set_tray_open(false);

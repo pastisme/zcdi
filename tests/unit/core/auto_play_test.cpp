@@ -18,14 +18,6 @@ namespace {
 
 constexpr uint32_t kSlaveChannel3 = zcdi::address_map::kSlave.base + 7;
 
-std::unique_ptr<zcdi::Machine> auto_play_machine() {
-    std::vector<std::byte> bios = zcdi_test::fake_bios();
-    std::unique_ptr<zcdi::Machine> m = std::make_unique<zcdi::Machine>(bios, zcdi::VideoStandard::kPal,
-                                        zcdi::Machine::InitParams{.auto_play = true});
-    m->cold_boot();
-    return m;
-}
-
 // Asks the servo for the disc status (channel 3) and reads its 4 bytes.
 uint32_t servo_disc_status(zcdi::Machine& m) {
     for (uint8_t v : {0xfa, 0xb0, 0x00, 0x00, 0x00}) board(m).write8(kSlaveChannel3, v);
@@ -40,7 +32,7 @@ uint32_t servo_disc_status(zcdi::Machine& m) {
 TEST_SUITE("core") {
 
 TEST_CASE("an audio CD is reported as audio and keeps Auto Play off") {
-    std::unique_ptr<zcdi::Machine> m = auto_play_machine();
+    std::unique_ptr<zcdi::Machine> m = zcdi_test::build_fake_machine_with({.auto_play = true});
     REQUIRE(m->mount_disc(std::make_unique<FakeAudioCd>(std::vector<int>{75, 75})));
     CHECK_FALSE(board(*m).playcdi_overlay_active());
     CHECK(servo_disc_status(*m) == 0xb0000125);
@@ -48,7 +40,7 @@ TEST_CASE("an audio CD is reported as audio and keeps Auto Play off") {
 
 // The Apprentice, Lucky Luke: the CD-i program sits before track 1's INDEX 01.
 TEST_CASE("a CD-i Ready disc is reported as audio but Auto Play starts it") {
-    std::unique_ptr<zcdi::Machine> m = auto_play_machine();
+    std::unique_ptr<zcdi::Machine> m = zcdi_test::build_fake_machine_with({.auto_play = true});
     FakeAudioCd::Options options;
     options.cdi_ready = true;
     REQUIRE(m->mount_disc(std::make_unique<FakeAudioCd>(std::vector<int>{75, 75}, options)));

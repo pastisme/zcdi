@@ -6,16 +6,11 @@
 
 #include "chips/mcd212/mcd212.h"
 #include "support/mcd212_field.h"
-#include "support/private_access.h"
+#include "support/mcd212_private.h"
 #include "support/state_roundtrip.h"
 
 using zcdi::chips::Mcd212;
-using zcdi::chips::Mcd212SaveState;
-using zcdi_test::priv;
-
-ZCDI_PRIVATE_MEMBER(StateClut, Mcd212SaveState, clut_, uint32_t[256]);
-ZCDI_PRIVATE_MEMBER(StateCursorControl, Mcd212SaveState, cursor_control_, uint32_t);
-ZCDI_PRIVATE_MEMBER(StateCursorPattern, Mcd212SaveState, cursor_pattern_, uint16_t[16]);
+using zcdi_test::state_of;
 
 namespace {
 
@@ -38,11 +33,11 @@ TEST_CASE("a restored MCD212 renders the same next frames") {
         plane_b[i] = uint8_t(i * 13);
     }
     Mcd212 a;
-    for (int i = 0; i < 256; ++i) priv<StateClut>(a)[i] = uint32_t(i * 0x010203);
+    for (int i = 0; i < 256; ++i) state_of(a).clut_[i] = uint32_t(i * 0x010203);
     // Enabled (bit23), blinking on/off with 12-frame on and off periods,
     // colour 15.
-    priv<StateCursorControl>(a) = 0x800000u | 0x080000u | 0x010000u | 0x000fu;
-    for (uint16_t& row : priv<StateCursorPattern>(a)) row = 0xffff;
+    state_of(a).cursor_control_ = 0x800000u | 0x080000u | 0x010000u | 0x000fu;
+    for (uint16_t& row : state_of(a).cursor_pattern_) row = 0xffff;
     for (int f = 0; f < 5; ++f) zcdi_test::run_field(a, plane_a.data(), plane_b.data(), plane_a.size());
 
     const std::vector<uint8_t> state = zcdi_test::save_state(a);

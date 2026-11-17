@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <span>
 #include <vector>
 
 #include "core/machine.h"
@@ -11,9 +12,16 @@
 
 namespace zcdi_test {
 
+// A 512 KiB BIOS ROM holding `code` from offset 0: the reset SSP and PC
+// (0x400008 is the byte after them), then the program.
+inline std::vector<std::byte> bios_with_program(std::span<const uint8_t> code) {
+    std::vector<std::byte> rom(0x80000, std::byte{0});
+    for (std::size_t i = 0; i < code.size(); ++i) rom[i] = std::byte{code[i]};
+    return rom;
+}
+
 // A counter loop storing to RAM. One Machine at a time (Musashi singleton).
 inline std::vector<std::byte> fake_bios(uint8_t variant = 0) {
-    std::vector<std::byte> rom(0x80000, std::byte{0});
     const uint8_t code[] = {
         0x00, 0x07, 0x00, 0x00,  // reset SSP $70000
         0x00, 0x40, 0x00, 0x08,  // reset PC $400008
@@ -21,16 +29,22 @@ inline std::vector<std::byte> fake_bios(uint8_t variant = 0) {
         0x21, 0xc0, 0x10, 0x00,  //   move.l d0,$1000.w
         0x60, 0xf8,              //   bra.s loop
     };
-    for (size_t i = 0; i < sizeof(code); ++i) rom[i] = std::byte{code[i]};
+    std::vector<std::byte> rom = bios_with_program(code);
     rom[0x100] = std::byte{variant};  // a different BIOS, same program
     return rom;
 }
 
-inline std::unique_ptr<zcdi::Machine> build_fake_machine(uint8_t variant = 0) {
-    std::vector<std::byte> bios = fake_bios(variant);
-    std::unique_ptr<zcdi::Machine> m = std::make_unique<zcdi::Machine>(bios, zcdi::VideoStandard::kPal);
+// Cold-booted, PAL.
+inline std::unique_ptr<zcdi::Machine> build_fake_machine_with(const zcdi::Machine::InitParams& params,
+                                                              uint8_t variant = 0) {
+    std::unique_ptr<zcdi::Machine> m =
+        std::make_unique<zcdi::Machine>(fake_bios(variant), zcdi::VideoStandard::kPal, params);
     m->cold_boot();
     return m;
+}
+
+inline std::unique_ptr<zcdi::Machine> build_fake_machine(uint8_t variant = 0) {
+    return build_fake_machine_with({}, variant);
 }
 
 inline std::vector<uint8_t> save_machine(zcdi::Machine& m) {
