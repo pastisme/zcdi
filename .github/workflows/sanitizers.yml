@@ -1,0 +1,44 @@
+name: Sanitizers
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  asan-ubsan:
+    name: Unit tests (ASan + UBSan)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Configure
+        run: |
+          cmake \
+            -S . \
+            -B build \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_FLAGS="-O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined" \
+            -DCMAKE_CXX_FLAGS="-O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined" \
+            -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined \
+            -DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=address,undefined \
+            -DZCDI_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build --parallel --target zcdi_unit_tests
+
+      - name: Test
+        env:
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1:suppressions=${{ github.workspace }}/tests/ubsan.supp
+        run: ctest --test-dir build --output-on-failure

@@ -1,0 +1,3 @@
+# libmpeg2 left-shifts negative values; GCC and Clang define the result (C++20 does too).
+shift-base:third_party/libmpeg2/*
+shift-exponent:third_party/libmpeg2/*

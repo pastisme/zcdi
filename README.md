@@ -3,6 +3,8 @@
 ![zcdi](zcdi.svg)
 
 [![Build](https://github.com/pastisme/zcdi/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/pastisme/zcdi/actions/workflows/build.yml)
+[![Coverage](https://coveralls.io/repos/github/pastisme/zcdi/badge.svg?branch=main)](https://coveralls.io/github/pastisme/zcdi?branch=main)
+[![CodeQL](https://github.com/pastisme/zcdi/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/pastisme/zcdi/actions/workflows/github-code-scanning/codeql)
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
 
 Zcdi is a **Philips CD-i (Mono-I / `cdimono1`)** emulator library with built-in **libretro** core support.

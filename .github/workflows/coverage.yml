@@ -1,0 +1,58 @@
+name: Coverage
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  coverage:
+    name: Unit test coverage (Linux)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Configure
+        run: |
+          cmake \
+            -S . \
+            -B build \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_FLAGS="--coverage -O0" \
+            -DCMAKE_CXX_FLAGS="--coverage -O0" \
+            -DCMAKE_EXE_LINKER_FLAGS=--coverage \
+            -DCMAKE_SHARED_LINKER_FLAGS=--coverage \
+            -DZCDI_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build --parallel --target zcdi_unit_tests
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Report
+        run: |
+          pipx run gcovr \
+            --root . \
+            --filter src/ \
+            --object-directory build \
+            --cobertura coverage.xml \
+            --print-summary
+
+      - name: Upload to Coveralls
+        uses: coverallsapp/github-action@v2
+        with:
+          file: coverage.xml
+          format: cobertura
+          fail-on-error: false

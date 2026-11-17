@@ -32,6 +32,7 @@ jobs:
             -S . \
             -B build \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_FLAGS=-Werror \
             -DVERSION_METADATA="$(git rev-parse --short HEAD)" \
             -DZCDI_BUILD_TESTS=ON
 
